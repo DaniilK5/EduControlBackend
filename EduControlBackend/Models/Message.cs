@@ -9,5 +9,8 @@
         public User Receiver { get; set; }
         public string Content { get; set; }
         public DateTime Timestamp { get; set; }
+        public string? AttachmentPath { get; set; }
+        public string? AttachmentName { get; set; }
+        public string? AttachmentType { get; set; }
     }
 }
