@@ -1,4 +1,5 @@
 using EduControlBackend.Models;
+using EduControlBackend.Models.MessagesModels;
 using EduControlBackend.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -183,7 +184,86 @@ namespace EduControlBackend.Controllers
                 return NotFound();
             }
         }
+
+        [HttpPut("{messageId}")]
+        public async Task<IActionResult> EditMessage(int messageId, [FromBody] EditMessageDto dto)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            var message = await _context.Messages
+                .Include(m => m.GroupChat)
+                .ThenInclude(gc => gc.Members)
+                .FirstOrDefaultAsync(m => m.Id == messageId);
+
+            if (message == null || message.IsDeleted)
+                return NotFound("Сообщение не найдено");
+
+            // Только автор сообщения может его редактировать
+            if (message.SenderId != currentUserId)
+                return Forbid("Только автор сообщения может его редактировать");
+
+            // Если это групповой чат, проверяем что пользователь всё ещё является его участником
+            if (message.GroupChatId.HasValue)
+            {
+                var isMember = message.GroupChat.Members.Any(m => m.UserId == currentUserId);
+                if (!isMember)
+                    return Forbid("Вы больше не являетесь участником этого чата");
+            }
+
+            message.Content = dto.Content;
+            await _context.SaveChangesAsync();
+
+            return Ok("Сообщение обновлено");
+        }
+
+        [HttpGet("direct/{userId}/attachments")]
+        public async Task<IActionResult> GetDirectChatAttachments(int userId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            var attachments = await _context.Messages
+                .Include(m => m.Sender)
+                .Where(m => !m.IsDeleted &&
+                           !m.GroupChatId.HasValue &&
+                           m.AttachmentPath != null &&
+                           ((m.SenderId == currentUserId && m.ReceiverId == userId) ||
+                            (m.SenderId == userId && m.ReceiverId == currentUserId)))
+                .OrderByDescending(m => m.Timestamp)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Timestamp,
+                    Sender = new
+                    {
+                        m.Sender.Id,
+                        m.Sender.FullName,
+                        m.Sender.Email
+                    },
+                    m.AttachmentName,
+                    m.AttachmentType,
+                    m.Content // Опциональное сообщение к файлу
+                })
+                .ToListAsync();
+
+            var totalAttachments = await _context.Messages
+                .CountAsync(m => !m.IsDeleted &&
+                                !m.GroupChatId.HasValue &&
+                                m.AttachmentPath != null &&
+                                ((m.SenderId == currentUserId && m.ReceiverId == userId) ||
+                                 (m.SenderId == userId && m.ReceiverId == currentUserId)));
+
+            var result = new
+            {
+                Items = attachments,
+                TotalCount = totalAttachments,
+                CurrentPage = page,
+                PageSize = pageSize,
+                TotalPages = (int)Math.Ceiling(totalAttachments / (double)pageSize)
+            };
+
+            return Ok(result);
+        }
     }
-
-
 }
