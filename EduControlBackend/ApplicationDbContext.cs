@@ -1,4 +1,6 @@
 ﻿using EduControlBackend.Models;
+using EduControlBackend.Models.Chat;
+using EduControlBackend.Models.LoginAndReg;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
 

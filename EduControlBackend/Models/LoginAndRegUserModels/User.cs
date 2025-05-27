@@ -1,4 +1,4 @@
-﻿namespace EduControlBackend.Models
+﻿namespace EduControlBackend.Models.LoginAndReg
 {
     public class User
     {

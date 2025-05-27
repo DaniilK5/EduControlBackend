@@ -27,83 +27,114 @@ namespace EduControlBackend.Controllers
         [HttpPost("send")]
         public async Task<IActionResult> SendMessage([FromForm] SendMessageDto dto)
         {
-            try
-            {
-                // Получаем id текущего пользователя из токена
-                var senderId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
-                if (senderId != dto.SenderId)
-                    return Forbid();
+            var senderId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
 
+            // Проверяем, является ли это личным сообщением или групповым
+            if (dto.GroupChatId.HasValue)
+            {
+                // Проверка для группового чата
+                var groupChat = await _context.GroupChats
+                    .Include(gc => gc.Members)
+                    .FirstOrDefaultAsync(gc => gc.Id == dto.GroupChatId);
+
+                if (groupChat == null)
+                    return NotFound("Групповой чат не найден");
+
+                if (!groupChat.Members.Any(m => m.UserId == senderId))
+                    return Forbid("Вы не являетесь участником этого чата");
+            }
+            else if (dto.ReceiverId.HasValue)
+            {
+                // Проверка для личного сообщения
                 var receiver = await _context.Users.FindAsync(dto.ReceiverId);
                 if (receiver == null)
                     return BadRequest("Получатель не найден");
-
-                // Проверка размера файла (например, 100 МБ)
-                if (dto.Attachment != null && dto.Attachment.Length > 104857600)
-                {
-                    return BadRequest("Файл слишком большой. Максимальный размер: 100 МБ");
-                }
-
-                var message = new Message
-                {
-                    SenderId = senderId,
-                    ReceiverId = dto.ReceiverId,
-                    Content = dto.Content,
-                    Timestamp = DateTime.UtcNow
-                };
-
-                if (dto.Attachment != null)
-                {
-                    // Проверка типа файла (опционально)
-                    var allowedTypes = new[] { ".jpg", ".jpeg", ".png", ".pdf", ".doc", ".docx", ".txt" };
-                    var extension = Path.GetExtension(dto.Attachment.FileName).ToLowerInvariant();
-                    if (!allowedTypes.Contains(extension))
-                    {
-                        return BadRequest("Неподдерживаемый тип файла");
-                    }
-
-                    var (path, fileName) = await _fileService.SaveFileAsync(dto.Attachment);
-                    message.AttachmentPath = path;
-                    message.AttachmentName = fileName;
-                    message.AttachmentType = dto.Attachment.ContentType;
-                }
-
-                _context.Messages.Add(message);
-                await _context.SaveChangesAsync();
-
-                return Ok("Сообщение отправлено");
             }
-            catch (Exception ex)
+            else
             {
-                // Логирование ошибки
-                Console.WriteLine($"Error in SendMessage: {ex}");
-                return StatusCode(500, "Произошла ошибка при отправке сообщения");
+                return BadRequest("Необходимо указать либо получателя, либо групповой чат");
             }
+
+            var message = new Message
+            {
+                SenderId = senderId,
+                ReceiverId = dto.ReceiverId,
+                GroupChatId = dto.GroupChatId,
+                Content = dto.Content,
+                Timestamp = DateTime.UtcNow
+            };
+
+            if (dto.Attachment != null)
+            {
+                var (path, fileName) = await _fileService.SaveFileAsync(dto.Attachment);
+                message.AttachmentPath = path;
+                message.AttachmentName = fileName;
+                message.AttachmentType = dto.Attachment.ContentType;
+            }
+
+            _context.Messages.Add(message);
+            await _context.SaveChangesAsync();
+
+            return Ok("Сообщение отправлено");
         }
 
-        // Получить все сообщения между двумя пользователями
-        [HttpGet("between/{userId}")]
-        public async Task<IActionResult> GetMessagesBetween(int userId)
+        [HttpGet("chat/{groupChatId}")]
+        public async Task<IActionResult> GetGroupChatMessages(int groupChatId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            // Проверяем, является ли пользователь участником чата
+            var isMember = await _context.GroupChatMembers
+                .AnyAsync(m => m.GroupChatId == groupChatId && m.UserId == currentUserId);
+
+            if (!isMember)
+                return Forbid();
+
             var messages = await _context.Messages
-                .Where(m =>
-                    (m.SenderId == currentUserId && m.ReceiverId == userId) ||
-                    (m.SenderId == userId && m.ReceiverId == currentUserId))
-                .OrderBy(m => m.Timestamp)
+                .Include(m => m.Sender)
+                .Where(m => m.GroupChatId == groupChatId && !m.IsDeleted)
+                .OrderByDescending(m => m.Timestamp)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Content,
+                    m.Timestamp,
+                    Sender = new { m.Sender.Id, m.Sender.FullName },
+                    HasAttachment = m.AttachmentPath != null,
+                    m.AttachmentName,
+                    m.AttachmentType
+                })
                 .ToListAsync();
 
             return Ok(messages);
         }
 
-        // Получить все сообщения, где пользователь отправитель или получатель
-        [HttpGet("my")]
-        public async Task<IActionResult> GetMyMessages()
+        [HttpGet("direct/{userId}")]
+        public async Task<IActionResult> GetDirectMessages(int userId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
             var messages = await _context.Messages
-                .Where(m => m.SenderId == currentUserId || m.ReceiverId == currentUserId)
+                .Include(m => m.Sender)
+                .Where(m => !m.IsDeleted &&
+                           !m.GroupChatId.HasValue &&
+                           ((m.SenderId == currentUserId && m.ReceiverId == userId) ||
+                            (m.SenderId == userId && m.ReceiverId == currentUserId)))
                 .OrderByDescending(m => m.Timestamp)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Content,
+                    m.Timestamp,
+                    Sender = new { m.Sender.Id, m.Sender.FullName },
+                    HasAttachment = m.AttachmentPath != null,
+                    m.AttachmentName,
+                    m.AttachmentType
+                })
                 .ToListAsync();
 
             return Ok(messages);
@@ -115,10 +146,30 @@ namespace EduControlBackend.Controllers
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
         
             var message = await _context.Messages
-                .FirstOrDefaultAsync(m => m.Id == messageId && 
-                    (m.SenderId == currentUserId || m.ReceiverId == currentUserId));
+                .Include(m => m.GroupChat)
+                .ThenInclude(gc => gc.Members)
+                .FirstOrDefaultAsync(m => m.Id == messageId);
 
-            if (message == null || string.IsNullOrEmpty(message.AttachmentPath))
+            if (message == null || message.IsDeleted)
+                return NotFound();
+
+            // Проверяем доступ к файлу
+            bool hasAccess = false;
+            if (message.GroupChatId.HasValue)
+            {
+                // Для группового чата
+                hasAccess = message.GroupChat.Members.Any(m => m.UserId == currentUserId);
+            }
+            else
+            {
+                // Для личных сообщений
+                hasAccess = message.SenderId == currentUserId || message.ReceiverId == currentUserId;
+            }
+
+            if (!hasAccess)
+                return Forbid();
+
+            if (string.IsNullOrEmpty(message.AttachmentPath))
                 return NotFound();
 
             try
@@ -134,11 +185,5 @@ namespace EduControlBackend.Controllers
         }
     }
 
-    public class SendMessageDto
-    {
-        public int SenderId { get; set; }
-        public int ReceiverId { get; set; }
-        public string Content { get; set; }
-        public IFormFile Attachment { get; set; }
-    }
+
 }

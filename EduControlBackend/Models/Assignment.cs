@@ -1,4 +1,6 @@
-﻿namespace EduControlBackend.Models
+﻿using EduControlBackend.Models.LoginAndReg;
+
+namespace EduControlBackend.Models
 {
     public class Assignment
     {

@@ -1,4 +1,5 @@
 using EduControlBackend.Models;
+using EduControlBackend.Models.Chat;
 using EduControlBackend.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -47,7 +48,7 @@ namespace EduControlBackend.Controllers
             return Ok(new { groupChatId = groupChat.Id });
         }
 
-        [HttpPost("{chatId}/members")]
+        [HttpPost("{chatId}/AddMember")]
         public async Task<IActionResult> AddMember(int chatId, [FromBody] AddMemberDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -80,7 +81,7 @@ namespace EduControlBackend.Controllers
             return Ok();
         }
 
-        [HttpPost("{chatId}/admins")]
+        [HttpPost("{chatId}/PromoteToAdmin")]
         public async Task<IActionResult> PromoteToAdmin(int chatId, [FromBody] PromoteToAdminDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -99,6 +100,9 @@ namespace EduControlBackend.Controllers
             var memberToPromote = chat.Members.FirstOrDefault(m => m.UserId == dto.UserId);
             if (memberToPromote == null)
                 return NotFound("Пользователь не найден в чате");
+
+            if (memberToPromote.IsAdmin)
+                return BadRequest("Пользователь уже является администратором");
 
             memberToPromote.IsAdmin = true;
             await _context.SaveChangesAsync();
@@ -180,26 +184,128 @@ namespace EduControlBackend.Controllers
                 return Forbid();
 
             var messages = await _context.Messages
+                .Include(m => m.Sender)
                 .Where(m => m.GroupChatId == chatId && !m.IsDeleted)
                 .OrderByDescending(m => m.Timestamp)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Content,
+                    m.Timestamp,
+                    Sender = new 
+                    { 
+                        m.Sender.Id,
+                        m.Sender.FullName,
+                        m.Sender.Email
+                    },
+                    HasAttachment = m.AttachmentPath != null,
+                    m.AttachmentName,
+                    m.AttachmentType
+                })
                 .ToListAsync();
 
-            return Ok(messages);
+            var chatInfo = new
+            {
+                chat.Id,
+                chat.Name,
+                chat.CreatedAt,
+                Members = chat.Members.Select(m => new
+                {
+                    UserId = m.UserId,
+                    m.IsAdmin,
+                    m.JoinedAt
+                }),
+                Messages = messages
+            };
+
+            return Ok(chatInfo);
         }
-    }
 
-    public class CreateGroupChatDto
-    {
-        public string Name { get; set; }
-    }
+        [HttpGet("{chatId}/members")]
+        public async Task<IActionResult> GetChatMembers(int chatId)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            
+            var chat = await _context.GroupChats
+                .Include(c => c.Members)
+                .ThenInclude(m => m.User)
+                .FirstOrDefaultAsync(c => c.Id == chatId);
 
-    public class AddMemberDto
-    {
-        public int UserId { get; set; }
-    }
+            if (chat == null)
+                return NotFound("Чат не найден");
 
-    public class PromoteToAdminDto
-    {
-        public int UserId { get; set; }
+            // Проверяем, является ли текущий пользователь участником чата
+            if (!chat.Members.Any(m => m.UserId == currentUserId))
+                return Forbid();
+
+            var members = chat.Members.Select(m => new
+            {
+                UserId = m.UserId,
+                m.User.FullName,
+                m.User.Email,
+                m.IsAdmin,
+                m.JoinedAt
+            }).OrderByDescending(m => m.IsAdmin)
+            .ThenBy(m => m.FullName)
+            .ToList();
+
+            return Ok(members);
+        }
+
+        [HttpGet("{chatId}/attachments")]
+        public async Task<IActionResult> GetChatAttachments(int chatId, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            
+            var chat = await _context.GroupChats
+                .Include(c => c.Members)
+                .FirstOrDefaultAsync(c => c.Id == chatId);
+
+            if (chat == null)
+                return NotFound("Чат не найден");
+
+            if (!chat.Members.Any(m => m.UserId == currentUserId))
+                return Forbid();
+
+            var attachments = await _context.Messages
+                .Include(m => m.Sender)
+                .Where(m => m.GroupChatId == chatId && 
+                        !m.IsDeleted && 
+                        m.AttachmentPath != null)
+                .OrderByDescending(m => m.Timestamp)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.Timestamp,
+                    Sender = new 
+                    { 
+                        m.Sender.Id,
+                        m.Sender.FullName,
+                        m.Sender.Email
+                    },
+                    m.AttachmentName,
+                    m.AttachmentType,
+                    m.Content // Опциональное сообщение к файлу
+                })
+                .ToListAsync();
+
+            var totalAttachments = await _context.Messages
+                .CountAsync(m => m.GroupChatId == chatId && 
+                            !m.IsDeleted && 
+                            m.AttachmentPath != null);
+
+            var result = new
+            {
+                Items = attachments,
+                TotalCount = totalAttachments,
+                CurrentPage = page,
+                PageSize = pageSize,
+                TotalPages = (int)Math.Ceiling(totalAttachments / (double)pageSize)
+            };
+
+            return Ok(result);
+        }
     }
 }

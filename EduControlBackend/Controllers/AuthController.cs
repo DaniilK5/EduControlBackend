@@ -1,4 +1,4 @@
-﻿using EduControlBackend.Models;
+﻿using EduControlBackend.Models.LoginAndReg;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

@@ -1,4 +1,7 @@
-﻿namespace EduControlBackend.Models
+﻿using EduControlBackend.Models.Chat;
+using EduControlBackend.Models.LoginAndReg;
+
+namespace EduControlBackend.Models
 {
     public class Message
     {

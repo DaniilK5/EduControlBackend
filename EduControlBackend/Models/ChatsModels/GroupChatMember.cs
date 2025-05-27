@@ -1,4 +1,7 @@
-namespace EduControlBackend.Models
+using EduControlBackend.Models.LoginAndReg;
+using System.Text.Json.Serialization;
+
+namespace EduControlBackend.Models.Chat
 {
     public class GroupChatMember
     {
@@ -6,7 +9,10 @@ namespace EduControlBackend.Models
         public int UserId { get; set; }
         public User User { get; set; }
         public int GroupChatId { get; set; }
+        
+        [JsonIgnore]
         public GroupChat GroupChat { get; set; }
+        
         public bool IsAdmin { get; set; }
         public DateTime JoinedAt { get; set; }
     }
