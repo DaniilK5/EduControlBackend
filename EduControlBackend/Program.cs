@@ -1,6 +1,8 @@
 using EduControlBackend;
+using EduControlBackend.Auth;
 using EduControlBackend.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -76,7 +78,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-builder.Services.AddAuthorization();
+// Настраиваем авторизацию и политики
+builder.Services.AddAuthorization(options =>
+{
+    AuthorizationPolicyProvider.ConfigurePolicies(options);
+});
+
+// Регистрируем провайдер политик
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, AuthorizationPolicyProvider>();
 
 // Настройка для обработки файлов
 builder.Services.Configure<IISServerOptions>(options =>

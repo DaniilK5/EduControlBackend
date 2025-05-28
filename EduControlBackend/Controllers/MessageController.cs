@@ -13,7 +13,7 @@ namespace EduControlBackend.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize] // Защита всех методов контроллера
+    [Authorize(Policy = UserRole.Policies.SendMessages)] // Базовая политика для всего контроллера
     public class MessageController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -26,6 +26,7 @@ namespace EduControlBackend.Controllers
         }
 
         [HttpPost("send")]
+        [Authorize(Policy = UserRole.Policies.SendMessages)]
         public async Task<IActionResult> SendMessage([FromForm] SendMessageDto dto)
         {
             var senderId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -77,6 +78,30 @@ namespace EduControlBackend.Controllers
             await _context.SaveChangesAsync();
 
             return Ok("Сообщение отправлено");
+        }
+
+        [HttpDelete("messages/{messageId}")]
+        [Authorize(Policy = UserRole.Policies.DeleteMessages)]
+        public async Task<IActionResult> DeleteMessage(int messageId)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            var message = await _context.Messages
+                .Include(m => m.GroupChat)
+                .ThenInclude(gc => gc.Members)
+                .FirstOrDefaultAsync(m => m.Id == messageId);
+
+            if (message == null || message.IsDeleted)
+                return NotFound("Сообщение не найдено");
+
+            // Только автор сообщения или администратор может его удалить
+            if (message.SenderId != currentUserId && !User.IsInRole(UserRole.Administrator))
+                return Forbid("Только автор сообщения или администратор может его удалить");
+
+            message.IsDeleted = true;
+            await _context.SaveChangesAsync();
+
+            return Ok("Сообщение удалено");
         }
 
         [HttpGet("chat/{groupChatId}")]

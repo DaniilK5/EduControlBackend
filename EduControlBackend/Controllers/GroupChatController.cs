@@ -10,7 +10,7 @@ namespace EduControlBackend.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize]
+    [Authorize] // Базовая авторизация
     public class GroupChatController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -23,6 +23,7 @@ namespace EduControlBackend.Controllers
         }
 
         [HttpPost("create")]
+        [Authorize(Policy = UserRole.Policies.ManageGroupChats)]
         public async Task<IActionResult> CreateGroupChat([FromBody] CreateGroupChatDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -49,6 +50,7 @@ namespace EduControlBackend.Controllers
         }
 
         [HttpPost("{chatId}/AddMember")]
+        [Authorize(Policy = UserRole.Policies.ManageGroupChats)]
         public async Task<IActionResult> AddMember(int chatId, [FromBody] AddMemberDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -82,6 +84,7 @@ namespace EduControlBackend.Controllers
         }
 
         [HttpPost("{chatId}/PromoteToAdmin")]
+        [Authorize(Policy = UserRole.Policies.ManageGroupChats)]
         public async Task<IActionResult> PromoteToAdmin(int chatId, [FromBody] PromoteToAdminDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -111,6 +114,7 @@ namespace EduControlBackend.Controllers
         }
 
         [HttpDelete("{chatId}/members/{userId}")]
+        [Authorize(Policy = UserRole.Policies.ManageGroupChats)]
         public async Task<IActionResult> RemoveMember(int chatId, int userId)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
@@ -141,6 +145,7 @@ namespace EduControlBackend.Controllers
         }
 
         [HttpDelete("{chatId}/messages/{messageId}")]
+        [Authorize(Policy = UserRole.Policies.DeleteMessages)]
         public async Task<IActionResult> DeleteMessage(int chatId, int messageId)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
