@@ -1,4 +1,5 @@
 using EduControlBackend.Models;
+using EduControlBackend.Models.AssignmentModels;
 using EduControlBackend.Models.CourseModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

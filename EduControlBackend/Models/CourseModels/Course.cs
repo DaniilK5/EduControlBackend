@@ -1,4 +1,5 @@
-﻿using EduControlBackend.Models.LoginAndReg;
+﻿using EduControlBackend.Models.AssignmentModels;
+using EduControlBackend.Models.LoginAndReg;
 
 namespace EduControlBackend.Models.CourseModels
 {

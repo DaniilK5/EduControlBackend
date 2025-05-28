@@ -1,7 +1,9 @@
 ﻿using EduControlBackend.Models;
 using EduControlBackend.Models.AdminModels;
+using EduControlBackend.Models.AssignmentModels;
 using EduControlBackend.Models.Chat;
 using EduControlBackend.Models.CourseModels;
+using EduControlBackend.Models.GradeModels;
 using EduControlBackend.Models.LoginAndReg;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
@@ -15,11 +17,12 @@ namespace EduControlBackend
         public DbSet<User> Users { get; set; }
         public DbSet<Assignment> Assignments { get; set; }
         public DbSet<Course> Courses { get; set; }
-        public DbSet<Grades> Grades { get; set; }
+        public DbSet<Grade> Grades { get; set; } // Оставляем только одну сущность для оценок
         public DbSet<Message> Messages { get; set; }
         public DbSet<GroupChat> GroupChats { get; set; }
         public DbSet<GroupChatMember> GroupChatMembers { get; set; }
         public DbSet<AppSettings> Settings { get; set; }
+        public DbSet<AssignmentSubmission> AssignmentSubmissions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -78,6 +81,24 @@ namespace EduControlBackend
                 .HasOne(cs => cs.User)
                 .WithMany()
                 .HasForeignKey(cs => cs.UserId);
+
+            modelBuilder.Entity<Grade>()
+                .HasOne(g => g.Assignment)
+                .WithMany()
+                .HasForeignKey(g => g.AssignmentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Grade>()
+                .HasOne(g => g.Student)
+                .WithMany()
+                .HasForeignKey(g => g.StudentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Grade>()
+                .HasOne(g => g.Instructor)
+                .WithMany()
+                .HasForeignKey(g => g.InstructorId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }
