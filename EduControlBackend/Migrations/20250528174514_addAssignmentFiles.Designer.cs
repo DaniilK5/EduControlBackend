@@ -3,6 +3,7 @@ using System;
 using EduControlBackend;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace EduControlBackend.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250528174514_addAssignmentFiles")]
+    partial class addAssignmentFiles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -109,6 +112,39 @@ namespace EduControlBackend.Migrations
                     b.HasIndex("InstructorId");
 
                     b.ToTable("Assignments");
+                });
+
+            modelBuilder.Entity("EduControlBackend.Models.AssignmentModels.AssignmentFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AssignmentId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FileType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignmentId");
+
+                    b.ToTable("AssignmentFiles");
                 });
 
             modelBuilder.Entity("EduControlBackend.Models.AssignmentModels.AssignmentSubmission", b =>
@@ -270,8 +306,9 @@ namespace EduControlBackend.Migrations
                     b.Property<int>("StudentId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("Value")
-                        .HasColumnType("integer");
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -400,6 +437,17 @@ namespace EduControlBackend.Migrations
                     b.Navigation("Course");
 
                     b.Navigation("Instructor");
+                });
+
+            modelBuilder.Entity("EduControlBackend.Models.AssignmentModels.AssignmentFile", b =>
+                {
+                    b.HasOne("EduControlBackend.Models.AssignmentModels.Assignment", "Assignment")
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Assignment");
                 });
 
             modelBuilder.Entity("EduControlBackend.Models.AssignmentModels.AssignmentSubmission", b =>

@@ -76,6 +76,7 @@ namespace EduControlBackend.Controllers
                 .Include(s => s.Assignment)
                     .ThenInclude(a => a.Course)
                         .ThenInclude(c => c.Teachers)
+                .Include(s => s.Grade)
                 .FirstOrDefaultAsync(s => s.Id == submissionId);
 
             if (submission == null)
@@ -85,9 +86,13 @@ namespace EduControlBackend.Controllers
             if (!submission.Assignment.Course.Teachers.Any(t => t.UserId == instructorId))
                 return Forbid("Вы не являетесь преподавателем этого курса");
 
+            // Проверяем, есть ли уже оценка
+            if (submission.Grade != null)
+                return BadRequest("Оценка уже выставлена. Используйте PUT запрос для изменения оценки.");
+
             var grade = new Grade
             {
-                Value = dto.Grade,
+                Value = dto.Value,
                 Comment = dto.Comment,
                 AssignmentId = submission.AssignmentId,
                 StudentId = submission.StudentId,
