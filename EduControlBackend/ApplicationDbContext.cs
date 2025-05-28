@@ -1,6 +1,7 @@
 ﻿using EduControlBackend.Models;
 using EduControlBackend.Models.AdminModels;
 using EduControlBackend.Models.Chat;
+using EduControlBackend.Models.CourseModels;
 using EduControlBackend.Models.LoginAndReg;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
@@ -49,6 +50,34 @@ namespace EduControlBackend
                 .WithMany(gc => gc.Members)
                 .HasForeignKey(m => m.GroupChatId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Конфигурация для CourseTeacher
+            modelBuilder.Entity<CourseTeacher>()
+                .HasKey(ct => new { ct.CourseId, ct.UserId });
+
+            modelBuilder.Entity<CourseTeacher>()
+                .HasOne(ct => ct.Course)
+                .WithMany(c => c.Teachers)
+                .HasForeignKey(ct => ct.CourseId);
+
+            modelBuilder.Entity<CourseTeacher>()
+                .HasOne(ct => ct.User)
+                .WithMany()
+                .HasForeignKey(ct => ct.UserId);
+
+            // Конфигурация для CourseStudent
+            modelBuilder.Entity<CourseStudent>()
+                .HasKey(cs => new { cs.CourseId, cs.UserId });
+
+            modelBuilder.Entity<CourseStudent>()
+                .HasOne(cs => cs.Course)
+                .WithMany(c => c.Students)
+                .HasForeignKey(cs => cs.CourseId);
+
+            modelBuilder.Entity<CourseStudent>()
+                .HasOne(cs => cs.User)
+                .WithMany()
+                .HasForeignKey(cs => cs.UserId);
         }
     }
 }

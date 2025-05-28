@@ -19,11 +19,18 @@ namespace EduControlBackend.Auth
             options.AddPolicy(UserRole.Policies.ManageSettings, policy =>
                 policy.RequireRole(UserRole.Administrator));
 
+            // Политики для управления курсами
+
             options.AddPolicy(UserRole.Policies.ManageCourses, policy =>
-                policy.RequireRole(UserRole.Administrator));
+                policy.RequireRole(UserRole.Administrator, UserRole.Teacher));
+
+            // Политики для просмотра курсов
+
+            options.AddPolicy(UserRole.Policies.ViewCourses, policy =>
+                policy.RequireRole(UserRole.Administrator, UserRole.Teacher, UserRole.Student));
 
             // Политики для управления расписанием
-            options.AddPolicy(UserRole.Policies.ManageSchedule, policy =>
+           options.AddPolicy(UserRole.Policies.ManageSchedule, policy =>
                 policy.RequireRole(UserRole.Administrator, UserRole.Teacher));
 
             options.AddPolicy(UserRole.Policies.ViewSchedule, policy =>
