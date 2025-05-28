@@ -1,4 +1,5 @@
 ﻿using EduControlBackend.Models;
+using EduControlBackend.Models.AdminModels;
 using EduControlBackend.Models.Chat;
 using EduControlBackend.Models.LoginAndReg;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ namespace EduControlBackend
         public DbSet<Message> Messages { get; set; }
         public DbSet<GroupChat> GroupChats { get; set; }
         public DbSet<GroupChatMember> GroupChatMembers { get; set; }
+        public DbSet<AppSettings> Settings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

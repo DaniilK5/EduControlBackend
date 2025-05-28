@@ -2,12 +2,14 @@ namespace EduControlBackend.Models.AdminModels
 {
     public class UpdateSettingsDto
     {
-        // Добавьте необходимые поля настроек
-        public int Id { get; set; }
-        public string FullName { get; set; }
-        public string Email { get; set; }
-        public string Password { get; set; }
-        public string Role { get; set; }
-        public string? StudentGroup { get; set; } // Группа только для студентов
+        public string SiteName { get; set; }
+        public string DefaultTimeZone { get; set; }
+        public int MaxFileSize { get; set; }
+        public string[] AllowedFileTypes { get; set; }
+        public int MaxUploadFilesPerMessage { get; set; }
+        public int DefaultPageSize { get; set; }
+        public bool RequireEmailVerification { get; set; }
+        public int PasswordMinLength { get; set; }
+        public bool RequireStrongPassword { get; set; }
     }
 }

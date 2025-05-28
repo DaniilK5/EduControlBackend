@@ -69,18 +69,81 @@ namespace EduControlBackend.Controllers
 
         [HttpGet("settings")]
         [Authorize(Policy = UserRole.Policies.ManageSettings)]
-        public IActionResult GetSettings()
+        public async Task<IActionResult> GetSettings()
         {
-            // Реализация получения настроек
-            return Ok(new { /* настройки */ });
+            var settings = await _context.Settings.FirstOrDefaultAsync();
+            if (settings == null)
+            {
+                // Если настройки не найдены, создаем настройки по умолчанию
+                settings = new AppSettings();
+                _context.Settings.Add(settings);
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new
+            {
+                settings.SiteName,
+                settings.DefaultTimeZone,
+                settings.MaxFileSize,
+                settings.AllowedFileTypes,
+                settings.MaxUploadFilesPerMessage,
+                settings.DefaultPageSize,
+                settings.RequireEmailVerification,
+                settings.PasswordMinLength,
+                settings.RequireStrongPassword
+            });
         }
 
         [HttpPut("settings")]
         [Authorize(Policy = UserRole.Policies.ManageSettings)]
         public async Task<IActionResult> UpdateSettings([FromBody] UpdateSettingsDto dto)
         {
-            // Реализация обновления настроек
-            return Ok();
+            var settings = await _context.Settings.FirstOrDefaultAsync();
+            if (settings == null)
+            {
+                settings = new AppSettings();
+                _context.Settings.Add(settings);
+            }
+
+            // Валидация
+            if (dto.MaxFileSize < 0)
+                return BadRequest("Максимальный размер файла не может быть отрицательным");
+
+            if (dto.DefaultPageSize <= 0)
+                return BadRequest("Размер страницы должен быть положительным числом");
+
+            if (dto.PasswordMinLength < 6)
+                return BadRequest("Минимальная длина пароля не может быть меньше 6 символов");
+
+            if (dto.MaxUploadFilesPerMessage <= 0)
+                return BadRequest("Максимальное количество файлов должно быть положительным числом");
+
+            // Обновляем настройки
+            settings.SiteName = dto.SiteName;
+            settings.DefaultTimeZone = dto.DefaultTimeZone;
+            settings.MaxFileSize = dto.MaxFileSize;
+            settings.AllowedFileTypes = dto.AllowedFileTypes;
+            settings.MaxUploadFilesPerMessage = dto.MaxUploadFilesPerMessage;
+            settings.DefaultPageSize = dto.DefaultPageSize;
+            settings.RequireEmailVerification = dto.RequireEmailVerification;
+            settings.PasswordMinLength = dto.PasswordMinLength;
+            settings.RequireStrongPassword = dto.RequireStrongPassword;
+
+            await _context.SaveChangesAsync();
+
+            // Возвращаем обновленные настройки
+            return Ok(new
+            {
+                settings.SiteName,
+                settings.DefaultTimeZone,
+                settings.MaxFileSize,
+                settings.AllowedFileTypes,
+                settings.MaxUploadFilesPerMessage,
+                settings.DefaultPageSize,
+                settings.RequireEmailVerification,
+                settings.PasswordMinLength,
+                settings.RequireStrongPassword
+            });
         }
     }
 }
