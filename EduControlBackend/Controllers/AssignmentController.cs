@@ -101,8 +101,43 @@ namespace EduControlBackend.Controllers
             };
 
             _context.Grades.Add(grade);
+            submission.Grade = grade; // Устанавливаем связь с AssignmentSubmission
             await _context.SaveChangesAsync();
 
+            return Ok(new { gradeId = grade.Id });
+        }
+
+        [HttpPut("submissions/{submissionId}/grade")]
+        [Authorize(Policy = UserRole.Policies.ManageGrades)]
+        public async Task<IActionResult> UpdateGrade(int submissionId, [FromBody] GradeSubmissionDto dto)
+        {
+            var instructorId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            var submission = await _context.AssignmentSubmissions
+                .Include(s => s.Assignment)
+                    .ThenInclude(a => a.Course)
+                        .ThenInclude(c => c.Teachers)
+                .Include(s => s.Grade)
+                .FirstOrDefaultAsync(s => s.Id == submissionId);
+
+            if (submission == null)
+                return NotFound("Работа не найдена");
+
+            // Проверяем, является ли преподаватель учителем этого курса
+            if (!submission.Assignment.Course.Teachers.Any(t => t.UserId == instructorId))
+                return Forbid("Вы не являетесь преподавателем этого курса");
+
+            // Проверяем, существует ли оценка
+            if (submission.Grade == null)
+                return NotFound("Оценка не найдена. Используйте POST запрос для выставления оценки.");
+
+            // Обновляем существующую оценку
+            submission.Grade.Value = dto.Value;
+            submission.Grade.Comment = dto.Comment;
+            submission.Grade.GradedAt = DateTime.UtcNow;
+            submission.Grade.InstructorId = instructorId; // Обновляем преподавателя, который изменил оценку
+
+            await _context.SaveChangesAsync();
             return Ok();
         }
 

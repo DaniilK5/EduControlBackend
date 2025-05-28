@@ -21,5 +21,9 @@ namespace EduControlBackend.Models.GradeModels
         public User Student { get; set; }
         public int InstructorId { get; set; }
         public User Instructor { get; set; }
+        
+        // Новая связь один-к-одному
+        public int SubmissionId { get; set; }
+        public AssignmentSubmission Submission { get; set; }
     }
 }

@@ -19,6 +19,8 @@ namespace EduControlBackend.Models.AssignmentModels
         public Assignment Assignment { get; set; }
         public int StudentId { get; set; }
         public User Student { get; set; }
+        
+        // Связь один-к-одному с Grade
         public Grade? Grade { get; set; }
     }
 }

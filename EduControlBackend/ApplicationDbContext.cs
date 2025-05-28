@@ -99,6 +99,12 @@ namespace EduControlBackend
                 .WithMany()
                 .HasForeignKey(g => g.InstructorId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Grade>()
+                .HasOne(g => g.Submission)
+                .WithOne(s => s.Grade)
+                .HasForeignKey<Grade>(g => g.SubmissionId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }
