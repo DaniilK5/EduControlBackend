@@ -26,6 +26,11 @@ namespace EduControlBackend.Controllers
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
 
+            // Проверяем существование предмета
+            var subject = await _context.Subjects.FirstOrDefaultAsync(s => s.Id == dto.SubjectId);
+            if (subject == null)
+                return BadRequest("Указанный предмет не найден");
+
             // Проверяем существование преподавателей
             var teachers = await _context.Users
                 .Where(u => dto.TeacherIds.Contains(u.Id))
@@ -48,6 +53,7 @@ namespace EduControlBackend.Controllers
             {
                 Name = dto.Name,
                 Description = dto.Description,
+                SubjectId = dto.SubjectId, // Добавляем связь с предметом
                 CreatedAt = DateTime.UtcNow,
                 Teachers = teachers.Select(t => new CourseTeacher 
                 { 

@@ -23,6 +23,7 @@ namespace EduControlBackend
         public DbSet<GroupChatMember> GroupChatMembers { get; set; }
         public DbSet<AppSettings> Settings { get; set; }
         public DbSet<AssignmentSubmission> AssignmentSubmissions { get; set; }
+        public DbSet<Subject> Subjects { get; set; } // Добавляем DbSet для предметов
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -105,6 +106,17 @@ namespace EduControlBackend
                 .WithOne(s => s.Grade)
                 .HasForeignKey<Grade>(g => g.SubmissionId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Конфигурация для Subject
+            modelBuilder.Entity<Subject>()
+                .HasIndex(s => s.Code)
+                .IsUnique();
+
+            modelBuilder.Entity<Course>()
+                .HasOne(c => c.Subject)
+                .WithMany(s => s.Courses)
+                .HasForeignKey(c => c.SubjectId)
+                .OnDelete(DeleteBehavior.Restrict);
         }
     }
 }

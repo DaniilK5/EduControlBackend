@@ -11,7 +11,11 @@ namespace EduControlBackend.Models.CourseModels
         public DateTime CreatedAt { get; set; }
         public bool IsActive { get; set; } = true;
 
-        // Связи
+        // Связь с предметом
+        public int SubjectId { get; set; }
+        public Subject Subject { get; set; }
+
+        // Существующие связи
         public ICollection<CourseTeacher> Teachers { get; set; } = new List<CourseTeacher>();
         public ICollection<CourseStudent> Students { get; set; } = new List<CourseStudent>();
         public ICollection<Assignment> Assignments { get; set; } = new List<Assignment>();
