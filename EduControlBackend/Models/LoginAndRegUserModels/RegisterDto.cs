@@ -7,5 +7,8 @@ namespace EduControlBackend.Models.LoginAndReg
         public string Password { get; set; }
         public string Role { get; set; }
         public string? StudentGroup { get; set; } // Ќеоб€зательное поле, используетс€ только дл€ студентов
+
+        // ƒл€ родителей - список ID детей
+        public List<int>? ChildrenIds { get; set; }
     }
 }

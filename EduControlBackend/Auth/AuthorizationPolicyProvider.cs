@@ -69,6 +69,13 @@ namespace EduControlBackend.Auth
 
             options.AddPolicy(UserRole.Policies.SubmitAssignments, policy =>
                 policy.RequireRole(UserRole.Student));
+
+            // Политики для управления студентами и группами
+            options.AddPolicy(UserRole.Policies.ManageStudents, policy =>
+                policy.RequireRole(UserRole.Administrator, UserRole.Teacher));
+
+            options.AddPolicy(UserRole.Policies.ViewStudentDetails, policy =>
+                policy.RequireRole(UserRole.Administrator, UserRole.Teacher));
         }
     }
 }

@@ -59,6 +59,19 @@ namespace EduControlBackend.Controllers
                 StudentGroup = registerDto.StudentGroup
             };
 
+            // Для родителей проверяем и связываем детей
+            if (registerDto.Role == UserRole.Parent && registerDto.ChildrenIds != null)
+            {
+                var children = await _context.Users
+                    .Where(u => registerDto.ChildrenIds.Contains(u.Id) && u.Role == UserRole.Student)
+                    .ToListAsync();
+
+                if (children.Count != registerDto.ChildrenIds.Count)
+                    return BadRequest("Некоторые указанные студенты не найдены");
+
+                user.Children = children;
+            }
+
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 

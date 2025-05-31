@@ -1,0 +1,232 @@
+using EduControlBackend.Models;
+using EduControlBackend.Models.StudentModels;
+using EduControlBackend.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+
+namespace EduControlBackend.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    [Authorize]
+    public class GradeImagesController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        private readonly FileService _fileService;
+
+        public GradeImagesController(ApplicationDbContext context, FileService fileService)
+        {
+            _context = context;
+            _fileService = fileService;
+        }
+
+        // Загрузка изображения
+        [HttpPost("upload")]
+        [Authorize(Policy = UserRole.Policies.ManageGrades)]
+        public async Task<IActionResult> UploadImage([FromForm] UploadGradeImageDto dto)
+        {
+            try
+            {
+                var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+                // Проверяем существование группы, если указана
+                if (dto.StudentGroupId.HasValue)
+                {
+                    var group = await _context.StudentGroups.FindAsync(dto.StudentGroupId);
+                    if (group == null)
+                        return NotFound("Группа не найдена");
+                }
+
+                // Проверяем существование предмета, если указан
+                if (dto.SubjectId.HasValue)
+                {
+                    var subject = await _context.Subjects.FindAsync(dto.SubjectId);
+                    if (subject == null)
+                        return NotFound("Предмет не найден");
+                }
+
+                // Сохраняем файл
+                var (path, fileName) = dto.Type == ImageType.Grades ? 
+                    await _fileService.SaveGradeImageAsync(dto.File) : 
+                    await _fileService.SaveScheduleImageAsync(dto.File);
+
+                var image = new GradeImage
+                {
+                    FilePath = path, // Используем path вместо filePath
+                    FileName = fileName,
+                    FileType = Path.GetExtension(dto.File.FileName).ToLowerInvariant(),
+                    Type = dto.Type,
+                    SubjectId = dto.SubjectId,
+                    StudentGroupId = dto.StudentGroupId,
+                    UploaderId = currentUserId,
+                    UploadedAt = DateTime.UtcNow
+                };
+
+                _context.GradeImages.Add(image);
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.FileType,
+                    image.Type,
+                    image.UploadedAt
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, "Произошла ошибка при загрузке файла");
+            }
+        }
+
+        // Получение списка изображений
+        [HttpGet]
+        public async Task<IActionResult> GetImages(
+            [FromQuery] ImageType? type = null,
+            [FromQuery] int? subjectId = null,
+            [FromQuery] int? groupId = null)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var query = _context.GradeImages
+                .Include(g => g.Subject)
+                .Include(g => g.StudentGroup)
+                .Include(g => g.Uploader)
+                .AsQueryable();
+
+            // Фильтрация по типу
+            if (type.HasValue)
+                query = query.Where(g => g.Type == type);
+
+            // Фильтрация по предмету
+            if (subjectId.HasValue)
+                query = query.Where(g => g.SubjectId == subjectId);
+
+            // Фильтрация по группе
+            if (groupId.HasValue)
+                query = query.Where(g => g.StudentGroupId == groupId);
+
+            // Фильтрация по правам доступа
+            if (userRole == UserRole.Student)
+            {
+                var studentGroupId = await _context.Users
+                    .Where(u => u.Id == currentUserId)
+                    .Select(u => u.StudentGroupId)
+                    .FirstOrDefaultAsync();
+
+                query = query.Where(g => g.StudentGroupId == studentGroupId);
+            }
+            else if (userRole == UserRole.Parent)
+            {
+                // Здесь нужно добавить логику для родителей, когда будет реализована связь родитель-студент
+                return BadRequest("Функционал для родителей в разработке");
+            }
+            else if (userRole == UserRole.Teacher)
+            {
+                var curatedGroupIds = await _context.StudentGroups
+                    .Where(g => g.CuratorId == currentUserId)
+                    .Select(g => g.Id)
+                    .ToListAsync();
+
+                query = query.Where(g => curatedGroupIds.Contains(g.StudentGroupId ?? 0));
+            }
+
+            var images = await query
+                .OrderByDescending(g => g.UploadedAt)
+                .Select(g => new
+                {
+                    g.Id,
+                    g.FileName,
+                    g.FileType,
+                    g.UploadedAt,
+                    g.Type,
+                    Subject = g.Subject != null ? new { g.Subject.Id, g.Subject.Name } : null,
+                    Group = g.StudentGroup != null ? new { g.StudentGroup.Id, g.StudentGroup.Name } : null,
+                    Uploader = new { g.Uploader.Id, g.Uploader.FullName }
+                })
+                .ToListAsync();
+
+            return Ok(images);
+        }
+
+        // Скачивание изображения
+        [HttpGet("{id}/download")]
+        public async Task<IActionResult> DownloadImage(int id)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var image = await _context.GradeImages
+                .Include(g => g.StudentGroup)
+                .FirstOrDefaultAsync(g => g.Id == id);
+
+            if (image == null)
+                return NotFound("Изображение не найдено");
+
+            // Проверка прав доступа
+            if (userRole == UserRole.Student)
+            {
+                var studentGroupId = await _context.Users
+                    .Where(u => u.Id == currentUserId)
+                    .Select(u => u.StudentGroupId)
+                    .FirstOrDefaultAsync();
+
+                if (image.StudentGroupId != studentGroupId)
+                    return Forbid();
+            }
+            else if (userRole == UserRole.Parent)
+            {
+                // Логика для родителей
+                return BadRequest("Функционал для родителей в разработке");
+            }
+            else if (userRole == UserRole.Teacher && image.UploaderId != currentUserId)
+            {
+                var isCurator = await _context.StudentGroups
+                    .AnyAsync(g => g.Id == image.StudentGroupId && g.CuratorId == currentUserId);
+
+                if (!isCurator)
+                    return Forbid();
+            }
+
+            var fileStream = image.Type == ImageType.Grades ? 
+                _fileService.GetGradeImageStream(image.FilePath) : 
+                _fileService.GetScheduleImageStream(image.FilePath);
+
+            if (fileStream == null)
+                return NotFound("Файл не найден");
+
+            return File(fileStream, "application/octet-stream", image.FileName);
+        }
+
+        // Удаление изображения
+        [HttpDelete("{id}")]
+        [Authorize(Policy = UserRole.Policies.ManageGrades)]
+        public async Task<IActionResult> DeleteImage(int id)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var image = await _context.GradeImages.FindAsync(id);
+            if (image == null)
+                return NotFound("Изображение не найдено");
+
+            // Проверка прав на удаление
+            if (userRole != UserRole.Administrator && image.UploaderId != currentUserId)
+                return Forbid();
+
+            _fileService.DeleteFile(image.FilePath);
+            _context.GradeImages.Remove(image);
+            await _context.SaveChangesAsync();
+
+            return Ok();
+        }
+    }
+}

@@ -5,6 +5,7 @@ using EduControlBackend.Models.Chat;
 using EduControlBackend.Models.CourseModels;
 using EduControlBackend.Models.GradeModels;
 using EduControlBackend.Models.LoginAndReg;
+using EduControlBackend.Models.StudentModels;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
 
@@ -24,6 +25,9 @@ namespace EduControlBackend
         public DbSet<AppSettings> Settings { get; set; }
         public DbSet<AssignmentSubmission> AssignmentSubmissions { get; set; }
         public DbSet<Subject> Subjects { get; set; } // Добавляем DbSet для предметов
+        public DbSet<StudentGroup> StudentGroups { get; set; }
+        public DbSet<GradeImage> GradeImages { get; set; }
+        public DbSet<Absence> Absences { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -117,6 +121,70 @@ namespace EduControlBackend
                 .WithMany(s => s.Courses)
                 .HasForeignKey(c => c.SubjectId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // Конфигурация для StudentGroup
+            modelBuilder.Entity<StudentGroup>()
+                .HasOne(g => g.Curator)
+                .WithMany(u => u.CuratedGroups)
+                .HasForeignKey(g => g.CuratorId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.Group)
+                .WithMany(g => g.Students)
+                .HasForeignKey(u => u.StudentGroupId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<StudentGroup>()
+                .HasIndex(g => g.Name)
+                .IsUnique();
+
+            modelBuilder.Entity<StudentGroup>()
+                .Property(g => g.Name)
+                .HasMaxLength(10) // Ограничиваем длину названия
+                .IsRequired();
+
+            modelBuilder.Entity<GradeImage>()
+                .HasOne(g => g.Subject)
+                .WithMany()
+                .HasForeignKey(g => g.SubjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<GradeImage>()
+                .HasOne(g => g.StudentGroup)
+                .WithMany()
+                .HasForeignKey(g => g.StudentGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<GradeImage>()
+                .HasOne(g => g.Uploader)
+                .WithMany()
+                .HasForeignKey(g => g.UploaderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Absence>()
+                .HasOne(a => a.Student)
+                .WithMany()
+                .HasForeignKey(a => a.StudentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Absence>()
+                .HasOne(a => a.StudentGroup)
+                .WithMany()
+                .HasForeignKey(a => a.StudentGroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Absence>()
+                .HasOne(a => a.Instructor)
+                .WithMany()
+                .HasForeignKey(a => a.InstructorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Конфигурация связи родитель-студент
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.Parents)
+                .WithMany(u => u.Children)
+                .UsingEntity(j => j.ToTable("ParentStudentRelations"));
         }
     }
 }

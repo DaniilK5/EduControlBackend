@@ -46,6 +46,13 @@ namespace EduControlBackend.Models
             public const string ManageAssignments = "ManageAssignments";
             public const string ViewAssignments = "ViewAssignments";
             public const string SubmitAssignments = "SubmitAssignments";
+
+
+            //политики для курирования
+
+            public const string ManageStudents = "ManageStudents";
+            public const string ViewStudentDetails = "ViewStudentDetails";
+
         }
     }
 }

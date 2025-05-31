@@ -3,6 +3,7 @@ using System;
 using EduControlBackend;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace EduControlBackend.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250530142645_AddStudentGroups")]
+    partial class AddStudentGroups
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -433,98 +436,6 @@ namespace EduControlBackend.Migrations
                     b.ToTable("Messages");
                 });
 
-            modelBuilder.Entity("EduControlBackend.Models.StudentModels.Absence", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Comment")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("Date")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("Hours")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("InstructorId")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("IsExcused")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Reason")
-                        .HasColumnType("text");
-
-                    b.Property<int>("StudentGroupId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("StudentId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InstructorId");
-
-                    b.HasIndex("StudentGroupId");
-
-                    b.HasIndex("StudentId");
-
-                    b.ToTable("Absences");
-                });
-
-            modelBuilder.Entity("EduControlBackend.Models.StudentModels.GradeImage", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("FilePath")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("FileType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int?>("StudentGroupId")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("SubjectId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Type")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("UploaderId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StudentGroupId");
-
-                    b.HasIndex("SubjectId");
-
-                    b.HasIndex("UploaderId");
-
-                    b.ToTable("GradeImages");
-                });
-
             modelBuilder.Entity("EduControlBackend.Models.StudentModels.StudentGroup", b =>
                 {
                     b.Property<int>("Id")
@@ -541,32 +452,13 @@ namespace EduControlBackend.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CuratorId");
 
-                    b.HasIndex("Name")
-                        .IsUnique();
-
                     b.ToTable("StudentGroups");
-                });
-
-            modelBuilder.Entity("UserUser", b =>
-                {
-                    b.Property<int>("ChildrenId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ParentsId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("ChildrenId", "ParentsId");
-
-                    b.HasIndex("ParentsId");
-
-                    b.ToTable("ParentStudentRelations", (string)null);
                 });
 
             modelBuilder.Entity("EduControlBackend.Models.AssignmentModels.Assignment", b =>
@@ -745,58 +637,6 @@ namespace EduControlBackend.Migrations
                     b.Navigation("Sender");
                 });
 
-            modelBuilder.Entity("EduControlBackend.Models.StudentModels.Absence", b =>
-                {
-                    b.HasOne("EduControlBackend.Models.LoginAndReg.User", "Instructor")
-                        .WithMany()
-                        .HasForeignKey("InstructorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("EduControlBackend.Models.StudentModels.StudentGroup", "StudentGroup")
-                        .WithMany()
-                        .HasForeignKey("StudentGroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("EduControlBackend.Models.LoginAndReg.User", "Student")
-                        .WithMany()
-                        .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Instructor");
-
-                    b.Navigation("Student");
-
-                    b.Navigation("StudentGroup");
-                });
-
-            modelBuilder.Entity("EduControlBackend.Models.StudentModels.GradeImage", b =>
-                {
-                    b.HasOne("EduControlBackend.Models.StudentModels.StudentGroup", "StudentGroup")
-                        .WithMany()
-                        .HasForeignKey("StudentGroupId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("EduControlBackend.Models.CourseModels.Subject", "Subject")
-                        .WithMany()
-                        .HasForeignKey("SubjectId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("EduControlBackend.Models.LoginAndReg.User", "Uploader")
-                        .WithMany()
-                        .HasForeignKey("UploaderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("StudentGroup");
-
-                    b.Navigation("Subject");
-
-                    b.Navigation("Uploader");
-                });
-
             modelBuilder.Entity("EduControlBackend.Models.StudentModels.StudentGroup", b =>
                 {
                     b.HasOne("EduControlBackend.Models.LoginAndReg.User", "Curator")
@@ -805,21 +645,6 @@ namespace EduControlBackend.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Curator");
-                });
-
-            modelBuilder.Entity("UserUser", b =>
-                {
-                    b.HasOne("EduControlBackend.Models.LoginAndReg.User", null)
-                        .WithMany()
-                        .HasForeignKey("ChildrenId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("EduControlBackend.Models.LoginAndReg.User", null)
-                        .WithMany()
-                        .HasForeignKey("ParentsId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("EduControlBackend.Models.AssignmentModels.Assignment", b =>
