@@ -290,5 +290,88 @@ namespace EduControlBackend.Controllers
 
             return Ok(result);
         }
+
+        [HttpGet("users")]
+        [Authorize(Policy = UserRole.Policies.SendMessages)]
+        public async Task<ActionResult<IEnumerable<ChatUserDto>>> GetAvailableChatUsers([FromQuery] string? search, [FromQuery] string? role)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var currentUserRole = User.FindFirstValue(ClaimTypes.Role);
+
+            // Базовый запрос
+            var query = _context.Users
+                .Include(u => u.Group)
+                .Where(u => u.Id != currentUserId); // Исключаем текущего пользователя
+
+            // Применяем фильтр по роли
+            if (!string.IsNullOrEmpty(role) && UserRole.AllRoles.Contains(role))
+            {
+                query = query.Where(u => u.Role == role);
+            }
+
+            // Применяем поиск по имени или email
+            if (!string.IsNullOrEmpty(search))
+            {
+                search = search.ToLower();
+                query = query.Where(u =>
+                    u.FullName.ToLower().Contains(search) ||
+                    u.Email.ToLower().Contains(search));
+            }
+
+            // Применяем фильтры в зависимости от роли текущего пользователя
+            switch (currentUserRole)
+            {
+                case UserRole.Student:
+                    // Студенты могут общаться с преподавателями и другими студентами своей группы
+                    query = query.Where(u =>
+                        u.Role == UserRole.Teacher ||
+                        (u.Role == UserRole.Student && u.StudentGroupId ==
+                            _context.Users.Where(cu => cu.Id == currentUserId)
+                            .Select(cu => cu.StudentGroupId)
+                            .FirstOrDefault()));
+                    break;
+
+                case UserRole.Teacher:
+                    // Преподаватели могут общаться со всеми студентами и другими преподавателями
+                    query = query.Where(u =>
+                        u.Role == UserRole.Teacher ||
+                        u.Role == UserRole.Student);
+                    break;
+
+                case UserRole.Parent:
+                    // Родители могут общаться с преподавателями и со своими детьми
+                    var childrenIds = await _context.Users
+                        .Where(u => u.Parents.Any(p => p.Id == currentUserId))
+                        .Select(u => u.Id)
+                        .ToListAsync();
+
+                    query = query.Where(u =>
+                        u.Role == UserRole.Teacher ||
+                        childrenIds.Contains(u.Id));
+                    break;
+
+                case UserRole.Administrator:
+                    // Администраторы могут общаться со всеми
+                    break;
+
+                default:
+                    return Forbid();
+            }
+
+            var users = await query
+                .OrderBy(u => u.Role)
+                .ThenBy(u => u.FullName)
+                .Select(u => new ChatUserDto
+                {
+                    Id = u.Id,
+                    FullName = u.FullName,
+                    Email = u.Email,
+                    Role = u.Role,
+                    StudentGroup = u.StudentGroup
+                })
+                .ToListAsync();
+
+            return Ok(users);
+        }
     }
 }
