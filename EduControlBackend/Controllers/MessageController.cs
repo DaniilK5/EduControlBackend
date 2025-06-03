@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
+using System.Net.Mime;
 using System.Security.Claims;
 using System.Threading.Tasks;
 
@@ -18,8 +19,9 @@ namespace EduControlBackend.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly FileService _fileService;
+        private readonly ILogger<MessageController> _logger; // Добавляем поле _logger
 
-        public MessageController(ApplicationDbContext context, FileService fileService)
+        public MessageController(ApplicationDbContext context, FileService fileService, ILogger<MessageController> logger)
         {
             _context = context;
             _fileService = fileService;
@@ -169,44 +171,89 @@ namespace EduControlBackend.Controllers
         [HttpGet("file/{messageId}")]
         public async Task<IActionResult> GetFile(int messageId)
         {
-            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
-        
-            var message = await _context.Messages
-                .Include(m => m.GroupChat)
-                .ThenInclude(gc => gc.Members)
-                .FirstOrDefaultAsync(m => m.Id == messageId);
-
-            if (message == null || message.IsDeleted)
-                return NotFound();
-
-            // Проверяем доступ к файлу
-            bool hasAccess = false;
-            if (message.GroupChatId.HasValue)
-            {
-                // Для группового чата
-                hasAccess = message.GroupChat.Members.Any(m => m.UserId == currentUserId);
-            }
-            else
-            {
-                // Для личных сообщений
-                hasAccess = message.SenderId == currentUserId || message.ReceiverId == currentUserId;
-            }
-
-            if (!hasAccess)
-                return Forbid();
-
-            if (string.IsNullOrEmpty(message.AttachmentPath))
-                return NotFound();
-
             try
             {
+                var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+                var message = await _context.Messages
+                    .Include(m => m.GroupChat)
+                    .ThenInclude(gc => gc.Members)
+                    .FirstOrDefaultAsync(m => m.Id == messageId);
+
+                if (message == null || message.IsDeleted)
+                    return NotFound("Файл не найден");
+
+                if (string.IsNullOrEmpty(message.AttachmentPath))
+                    return NotFound("Файл не найден");
+
+                // Проверяем доступ к файлу
+                bool hasAccess = false;
+                if (message.GroupChatId.HasValue)
+                {
+                    // Для группового чата
+                    hasAccess = message.GroupChat.Members.Any(m => m.UserId == currentUserId);
+                }
+                else
+                {
+                    // Для личных сообщений
+                    hasAccess = message.SenderId == currentUserId || message.ReceiverId == currentUserId;
+                }
+
+                if (!hasAccess)
+                    return Forbid("У вас нет доступа к этому файлу");
+
                 var fileBytes = await _fileService.GetFileAsync(message.AttachmentPath);
-                return File(fileBytes, message.AttachmentType ?? "application/octet-stream", 
-                    message.AttachmentName);
+
+                // Определяем MIME-тип файла
+                string contentType = "application/octet-stream"; // значение по умолчанию
+                if (!string.IsNullOrWhiteSpace(message.AttachmentType))
+                {
+                    contentType = message.AttachmentType;
+                }
+                else
+                {
+                    // Попытка определить тип файла по расширению
+                    var extension = Path.GetExtension(message.AttachmentName)?.ToLowerInvariant();
+                    if (!string.IsNullOrEmpty(extension))
+                    {
+                        contentType = extension switch
+                        {
+                            ".jpg" or ".jpeg" => "image/jpeg",
+                            ".png" => "image/png",
+                            ".gif" => "image/gif",
+                            ".pdf" => "application/pdf",
+                            ".doc" => "application/msword",
+                            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            ".xls" => "application/vnd.ms-excel",
+                            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            ".txt" => "text/plain",
+                            _ => "application/octet-stream"
+                        };
+                    }
+                }
+
+                // Убедимся, что имя файла корректно
+                string fileName = message.AttachmentName;
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    fileName = "file" + Path.GetExtension(message.AttachmentPath);
+                }
+
+                // Добавляем заголовок Content-Disposition
+                var cd = new ContentDisposition
+                {
+                    FileName = fileName,
+                    Inline = false // Это заставит браузер скачивать файл вместо отображения
+                };
+
+                Response.Headers.Add("Content-Disposition", cd.ToString());
+
+                return File(fileBytes, contentType, fileName);
             }
-            catch (FileNotFoundException)
+            catch (Exception ex)
             {
-                return NotFound();
+                _logger.LogError(ex, "Ошибка при получении файла {MessageId}", messageId);
+                return Problem("Ошибка при получении файла", statusCode: 500);
             }
         }
 
