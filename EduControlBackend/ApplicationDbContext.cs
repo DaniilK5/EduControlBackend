@@ -28,6 +28,8 @@ namespace EduControlBackend
         public DbSet<StudentGroup> StudentGroups { get; set; }
         public DbSet<GradeImage> GradeImages { get; set; }
         public DbSet<Absence> Absences { get; set; }
+        public DbSet<CourseStudent> CourseStudents { get; set; }
+        public DbSet<CourseTeacher> CourseTeachers { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

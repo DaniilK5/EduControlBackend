@@ -157,6 +157,7 @@ namespace EduControlBackend.Controllers
         public async Task<IActionResult> CreateAbsence([FromBody] CreateAbsenceDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
 
             // Проверяем существование студента
             var student = await _context.Users
@@ -168,6 +169,26 @@ namespace EduControlBackend.Controllers
 
             if (student.Group == null)
                 return BadRequest("Студент не привязан к группе");
+
+            // Проверяем права доступа для преподавателей
+            if (userRole == UserRole.Teacher)
+            {
+                // Проверяем, является ли преподаватель куратором группы
+                bool isCurator = student.Group.CuratorId == currentUserId;
+
+                // Проверяем, преподаёт ли учитель в группе студента
+                bool isTeaching = await _context.CourseTeachers
+                    .Where(ct => ct.UserId == currentUserId)
+                    .Join(_context.CourseStudents,
+                        ct => ct.CourseId,
+                        cs => cs.CourseId,
+                        (ct, cs) => cs.UserId)
+                    .AnyAsync(studentId => studentId == student.Id);
+
+                if (!isCurator && !isTeaching)
+                    return Forbid("Вы можете отмечать пропуски только для студентов из ваших групп");
+            }
+            // Для администраторов пропускаем проверку
 
             var absence = new Absence
             {
@@ -290,6 +311,208 @@ namespace EduControlBackend.Controllers
                 .ToListAsync();
 
             return Ok(absencesByChild);
+        }
+
+
+        [HttpGet("available-students")]
+        [Authorize(Policy = UserRole.Policies.ManageStudents)]
+        public async Task<IActionResult> GetAvailableStudents()
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var query = _context.Users
+                .Include(u => u.Group)
+                .Where(u => u.Role == UserRole.Student && u.StudentGroupId != null)
+                .AsQueryable();
+
+            // Для преподавателей фильтруем студентов
+            if (userRole == UserRole.Teacher)
+            {
+                // Получаем студентов из групп, где преподаватель является куратором
+                var curatedStudents = query.Where(u => u.Group.CuratorId == currentUserId);
+
+                // Получаем студентов из групп, где преподаватель ведёт занятия
+                var taughtStudents = query.Where(student =>
+                    _context.CourseTeachers
+                        .Where(ct => ct.UserId == currentUserId)
+                        .Join(_context.CourseStudents,
+                            ct => ct.CourseId,
+                            cs => cs.CourseId,
+                            (ct, cs) => cs.UserId)
+                        .Contains(student.Id));
+
+                // Объединяем результаты
+                query = curatedStudents.Union(taughtStudents);
+            }
+            // Для администраторов оставляем полный список
+
+            var students = await query
+                .OrderBy(s => s.Group.Name)
+                .ThenBy(s => s.FullName)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.FullName,
+                    s.StudentId, // Номер студенческого билета
+                    Group = new
+                    {
+                        s.Group.Id,
+                        s.Group.Name,
+                        Curator = s.Group.Curator != null ? new
+                        {
+                            s.Group.Curator.Id,
+                            s.Group.Curator.FullName
+                        } : null
+                    },
+                    // Добавляем информацию о пропусках за последний месяц
+                    RecentAbsences = _context.Absences
+                        .Where(a => a.StudentId == s.Id &&
+                                   a.Date >= DateTime.UtcNow.AddMonths(-1))
+                        .OrderByDescending(a => a.Date)
+                        .Select(a => new
+                        {
+                            a.Date,
+                            a.Hours,
+                            a.IsExcused,
+                            a.Reason
+                        })
+                        .ToList()
+                })
+                .ToListAsync();
+
+            // Группируем студентов по группам для удобства
+            var groupedStudents = students
+                .GroupBy(s => s.Group.Name)
+                .Select(g => new
+                {
+                    GroupName = g.Key,
+                    GroupId = g.First().Group.Id,
+                    Curator = g.First().Group.Curator,
+                    Students = g.Select(s => new
+                    {
+                        s.Id,
+                        s.FullName,
+                        s.StudentId,
+                        TotalAbsenceHours = s.RecentAbsences.Sum(a => a.Hours),
+                        ExcusedHours = s.RecentAbsences.Where(a => a.IsExcused).Sum(a => a.Hours),
+                        UnexcusedHours = s.RecentAbsences.Where(a => !a.IsExcused).Sum(a => a.Hours),
+                        RecentAbsences = s.RecentAbsences
+                    }).OrderBy(s => s.FullName)
+                })
+                .OrderBy(g => g.GroupName);
+
+            return Ok(new
+            {
+                TotalGroups = groupedStudents.Count(),
+                TotalStudents = students.Count,
+                Groups = groupedStudents
+            });
+        }
+
+
+        // Получение статистики пропусков по всем группам
+        [HttpGet("groups/statistics")]
+        [Authorize(Policy = UserRole.Policies.ManageStudents)] // Только для преподавателей и администраторов
+        public async Task<IActionResult> GetAllGroupsStatistics(
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null)
+        {
+            var query = _context.StudentGroups
+                .Include(g => g.Students)
+                .Include(g => g.Curator)
+                .AsQueryable();
+
+            var groupsData = await query.Select(group => new
+            {
+                GroupInfo = new
+                {
+                    group.Id,
+                    group.Name,
+                    group.Description,
+                    StudentsCount = group.Students.Count,
+                    Curator = group.Curator != null ? new 
+                    { 
+                        group.Curator.Id,
+                        group.Curator.FullName 
+                    } : null
+                },
+                Absences = _context.Absences
+                    .Where(a => a.StudentGroupId == group.Id)
+                    .Where(a => !startDate.HasValue || a.Date >= startDate.Value)
+                    .Where(a => !endDate.HasValue || a.Date <= endDate.Value)
+                    .GroupBy(a => a.StudentId)
+                    .Select(g => new
+                    {
+                        StudentId = g.Key,
+                        Student = g.First().Student.FullName,
+                        TotalHours = g.Sum(a => a.Hours),
+                        ExcusedHours = g.Where(a => a.IsExcused).Sum(a => a.Hours),
+                        UnexcusedHours = g.Where(a => !a.IsExcused).Sum(a => a.Hours),
+                        AbsenceDates = g.OrderByDescending(a => a.Date)
+                            .Select(a => new
+                            {
+                                a.Date,
+                                a.Hours,
+                                a.IsExcused,
+                                a.Reason
+                            })
+                    })
+                    .OrderByDescending(s => s.TotalHours)
+                    .ToList(),
+            })
+            .ToListAsync();
+
+            // Подсчитываем общую статистику по всем группам
+            var totalStatistics = new
+            {
+                TotalGroups = groupsData.Count,
+                TotalStudents = groupsData.Sum(g => g.GroupInfo.StudentsCount),
+                TotalAbsenceHours = groupsData.Sum(g => g.Absences.Sum(s => s.TotalHours)),
+                ExcusedHours = groupsData.Sum(g => g.Absences.Sum(s => s.ExcusedHours)),
+                UnexcusedHours = groupsData.Sum(g => g.Absences.Sum(s => s.UnexcusedHours)),
+                AverageAbsenceHoursPerGroup = groupsData.Any() ? 
+                    Math.Round(groupsData.Average(g => 
+                        g.Absences.Any() ? g.Absences.Sum(s => s.TotalHours) : 0), 2) : 0,
+                GroupsWithNoAbsences = groupsData.Count(g => !g.Absences.Any()),
+                Period = new
+                {
+                    StartDate = startDate?.ToString("yyyy-MM-dd"),
+                    EndDate = endDate?.ToString("yyyy-MM-dd")
+                }
+            };
+
+            var result = new
+            {
+                TotalStatistics = totalStatistics,
+                GroupsDetails = groupsData.Select(g => new
+                {
+                    g.GroupInfo,
+                    Statistics = new
+                    {
+                        TotalAbsenceHours = g.Absences.Sum(s => s.TotalHours),
+                        ExcusedHours = g.Absences.Sum(s => s.ExcusedHours),
+                        UnexcusedHours = g.Absences.Sum(s => s.UnexcusedHours),
+                        AverageAbsenceHoursPerStudent = g.Absences.Any() && g.GroupInfo.StudentsCount > 0 ? 
+                            Math.Round((double)g.Absences.Sum(s => s.TotalHours) / g.GroupInfo.StudentsCount, 2) : 0,
+                        StudentsWithAbsences = g.Absences.Count,
+                        TopAbsentStudents = g.Absences
+                            .OrderByDescending(s => s.TotalHours)
+                            .Take(5)
+                            .Select(s => new
+                            {
+                                StudentId = s.StudentId,
+                                StudentName = s.Student,
+                                s.TotalHours,
+                                s.ExcusedHours,
+                                s.UnexcusedHours
+                            })
+                    }
+                })
+                .OrderByDescending(g => g.Statistics.TotalAbsenceHours)
+            };
+
+            return Ok(result);
         }
     }
 }

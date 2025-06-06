@@ -233,5 +233,171 @@ namespace EduControlBackend.Controllers
 
             return Ok(submissions);
         }
+
+        [HttpPost("create")]
+        [Authorize(Policy = UserRole.Policies.ManageAssignments)]
+        public async Task<IActionResult> CreateAssignment([FromForm] CreateAssignmentDto dto)
+        {
+            var instructorId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            // Проверяем, является ли преподаватель учителем этого курса
+            var course = await _context.Courses
+                .Include(c => c.Teachers)
+                .FirstOrDefaultAsync(c => c.Id == dto.CourseId);
+
+            if (course == null)
+                return NotFound("Курс не найден");
+
+            if (!course.Teachers.Any(t => t.UserId == instructorId))
+                return Forbid("Вы не являетесь преподавателем этого курса");
+
+            var assignment = new Assignment
+            {
+                Title = dto.Title,
+                Description = dto.Description,
+                Deadline = dto.Deadline,
+                CourseId = dto.CourseId,
+                InstructorId = instructorId
+            };
+
+            // Обрабатываем прикрепленный файл
+            if (dto.Attachment != null)
+            {
+                var (path, fileName) = await _fileService.SaveFileAsync(dto.Attachment);
+                assignment.AttachmentPath = path;
+                assignment.AttachmentName = fileName;
+                assignment.AttachmentType = dto.Attachment.ContentType;
+            }
+
+            _context.Assignments.Add(assignment);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { assignmentId = assignment.Id });
+        }
+
+        [HttpGet("{assignmentId}")]
+        [Authorize(Policy = UserRole.Policies.ViewAssignments)]
+        public async Task<IActionResult> GetAssignment(int assignmentId)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var assignment = await _context.Assignments
+                .Include(a => a.Course)
+                    .ThenInclude(c => c.Students)
+                .Include(a => a.Course)
+                    .ThenInclude(c => c.Teachers)
+                .Include(a => a.Instructor)
+                .FirstOrDefaultAsync(a => a.Id == assignmentId);
+
+            if (assignment == null)
+                return NotFound("Задание не найдено");
+
+            // Проверяем права доступа
+            bool hasAccess = false;
+            if (userRole == UserRole.Administrator ||
+                assignment.Course.Teachers.Any(t => t.UserId == currentUserId))
+            {
+                hasAccess = true;
+            }
+            else if (userRole == UserRole.Student)
+            {
+                hasAccess = assignment.Course.Students.Any(s => s.UserId == currentUserId);
+            }
+
+            if (!hasAccess)
+                return Forbid();
+
+            // Получаем информацию о сдаче задания текущим студентом
+            AssignmentSubmission? studentSubmission = null;
+            if (userRole == UserRole.Student)
+            {
+                studentSubmission = await _context.AssignmentSubmissions
+                    .Include(s => s.Grade)
+                    .FirstOrDefaultAsync(s => s.AssignmentId == assignmentId &&
+                                            s.StudentId == currentUserId);
+            }
+
+            var result = new
+            {
+                assignment.Id,
+                assignment.Title,
+                assignment.Description,
+                assignment.Deadline,
+                Course = new
+                {
+                    assignment.Course.Id,
+                    assignment.Course.Name
+                },
+                Instructor = new
+                {
+                    assignment.Instructor.Id,
+                    assignment.Instructor.FullName
+                },
+                HasAttachment = assignment.AttachmentPath != null,
+                assignment.AttachmentName,
+                StudentSubmission = studentSubmission != null ? new
+                {
+                    studentSubmission.Id,
+                    studentSubmission.Content,
+                    studentSubmission.SubmittedAt,
+                    HasAttachment = studentSubmission.AttachmentPath != null,
+                    studentSubmission.AttachmentName,
+                    Grade = studentSubmission.Grade != null ? new
+                    {
+                        studentSubmission.Grade.Value,
+                        studentSubmission.Grade.Comment,
+                        studentSubmission.Grade.GradedAt
+                    } : null
+                } : null
+            };
+
+            return Ok(result);
+        }
+
+
+        [HttpGet("{assignmentId}/file")]
+        [Authorize(Policy = UserRole.Policies.ViewAssignments)]
+        public async Task<IActionResult> GetAssignmentFile(int assignmentId)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var assignment = await _context.Assignments
+                .Include(a => a.Course)
+                    .ThenInclude(c => c.Students)
+                .Include(a => a.Course)
+                    .ThenInclude(c => c.Teachers)
+                .FirstOrDefaultAsync(a => a.Id == assignmentId);
+
+            if (assignment == null || string.IsNullOrEmpty(assignment.AttachmentPath))
+                return NotFound();
+
+            // Проверяем права доступа
+            bool hasAccess = false;
+            if (userRole == UserRole.Administrator ||
+                assignment.Course.Teachers.Any(t => t.UserId == currentUserId))
+            {
+                hasAccess = true;
+            }
+            else if (userRole == UserRole.Student)
+            {
+                hasAccess = assignment.Course.Students.Any(s => s.UserId == currentUserId);
+            }
+
+            if (!hasAccess)
+                return Forbid();
+
+            try
+            {
+                var fileBytes = await _fileService.GetFileAsync(assignment.AttachmentPath);
+                return File(fileBytes, assignment.AttachmentType ?? "application/octet-stream",
+                    assignment.AttachmentName);
+            }
+            catch (FileNotFoundException)
+            {
+                return NotFound();
+            }
+        }
     }
 }

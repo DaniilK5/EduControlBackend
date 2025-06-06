@@ -733,5 +733,88 @@ namespace EduControlBackend.Controllers
                     : "Студент удалён из группы"
             });
         }
+
+        [HttpGet("list")]
+        [Authorize]
+        public async Task<IActionResult> GetGroupsList()
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+            var userRole = User.FindFirstValue(ClaimTypes.Role);
+
+            var query = _context.StudentGroups
+                .Include(g => g.Curator)
+                .Include(g => g.Students)
+                .AsQueryable();
+
+            // Фильтруем доступные группы в зависимости от роли пользователя
+            switch (userRole)
+            {
+                case UserRole.Student:
+                    // Студент видит только свою группу
+                    var studentGroup = await _context.Users
+                        .Where(u => u.Id == currentUserId)
+                        .Select(u => u.StudentGroupId)
+                        .FirstOrDefaultAsync();
+                    query = query.Where(g => g.Id == studentGroup);
+                    break;
+
+                case UserRole.Parent:
+                    // Родитель видит группы своих детей
+                    var childrenGroups = await _context.Users
+                        .Where(u => u.Parents.Any(p => p.Id == currentUserId))
+                        .Select(u => u.StudentGroupId)
+                        .Where(id => id.HasValue)
+                        .Distinct()
+                        .ToListAsync();
+                    query = query.Where(g => childrenGroups.Contains(g.Id));
+                    break;
+
+                case UserRole.Teacher:
+                    // Преподаватель видит группы, где он куратор или преподает
+                    var teacherGroups = await (
+                        from g in _context.StudentGroups
+                        where g.CuratorId == currentUserId ||
+                              g.Students.Any(student =>
+                                  _context.CourseStudents
+                                      .Where(cs => cs.UserId == student.Id)
+                                      .Any(cs => _context.CourseTeachers
+                                          .Any(ct => ct.CourseId == cs.CourseId && ct.UserId == currentUserId)))
+                        select g.Id
+                    ).Distinct().ToListAsync();
+
+                    query = query.Where(g => teacherGroups.Contains(g.Id));
+                    break;
+
+                case UserRole.Administrator:
+                    // Администратор видит все группы
+                    break;
+
+                default:
+                    return Forbid();
+            }
+
+            var groups = await query
+                .OrderBy(g => g.Name)
+                .Select(g => new
+                {
+                    g.Id,
+                    g.Name,
+                    g.Description,
+                    StudentsCount = g.Students.Count,
+                    Curator = g.Curator != null ? new
+                    {
+                        g.Curator.Id,
+                        g.Curator.FullName
+                    } : null,
+                    HasStudents = g.Students.Any()
+                })
+                .ToListAsync();
+
+            return Ok(new
+            {
+                TotalCount = groups.Count,
+                Groups = groups
+            });
+        }
     }
 }

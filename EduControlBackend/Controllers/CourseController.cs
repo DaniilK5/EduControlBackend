@@ -119,10 +119,10 @@ namespace EduControlBackend.Controllers
 
             return Ok(courses);
         }
-
+        /*
         [HttpPost("{courseId}/assignments")]
         [Authorize(Policy = UserRole.Policies.ManageAssignments)]
-        public async Task<IActionResult> CreateAssignment(int courseId, [FromBody] CreateAssignmentDto dto)
+        public async Task<IActionResult> CreateAssignment(int courseId, [FromBody] Models.CourseModels.CreateAssignmentDto dto)
         {
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
 
@@ -151,7 +151,7 @@ namespace EduControlBackend.Controllers
 
             return Ok(new { assignmentId = assignment.Id });
         }
-
+        */
         [HttpGet("{courseId}/assignments")]
         [Authorize(Policy = UserRole.Policies.ViewAssignments)]
         public async Task<IActionResult> GetCourseAssignments(int courseId)
@@ -193,16 +193,126 @@ namespace EduControlBackend.Controllers
         [Authorize(Policy = UserRole.Policies.ManageCourses)]
         public async Task<IActionResult> UpdateCourse(int courseId, [FromBody] UpdateCourseDto dto)
         {
-            var course = await _context.Courses.FindAsync(courseId);
+            var course = await _context.Courses
+                .Include(c => c.Teachers)
+                .Include(c => c.Students)
+                .Include(c => c.Subject)
+                .FirstOrDefaultAsync(c => c.Id == courseId);
+
             if (course == null)
                 return NotFound("Курс не найден");
 
+            // Проверяем существование предмета
+            var subject = await _context.Subjects.FirstOrDefaultAsync(s => s.Id == dto.SubjectId);
+            if (subject == null)
+                return BadRequest("Указанный предмет не найден");
+
+            // Проверяем существование преподавателей
+            var teachers = await _context.Users
+                .Where(u => dto.TeacherIds.Contains(u.Id))
+                .Where(u => u.Role == UserRole.Teacher || u.Role == UserRole.Administrator)
+                .ToListAsync();
+
+            if (teachers.Count != dto.TeacherIds.Count)
+                return BadRequest("Некоторые преподаватели не найдены или не имеют соответствующей роли");
+
+            if (teachers.Count == 0)
+                return BadRequest("Курс должен иметь хотя бы одного преподавателя");
+
+            // Проверяем существование студентов
+            var students = await _context.Users
+                .Where(u => dto.StudentIds.Contains(u.Id))
+                .Where(u => u.Role == UserRole.Student)
+                .ToListAsync();
+
+            if (students.Count != dto.StudentIds.Count)
+                return BadRequest("Некоторые студенты не найдены или не имеют роли студента");
+
+            // Обновляем основную информацию
             course.Name = dto.Name;
             course.Description = dto.Description;
             course.IsActive = dto.IsActive;
+            course.SubjectId = dto.SubjectId;
+
+            // Обновляем список преподавателей
+            var currentTeacherIds = course.Teachers.Select(t => t.UserId).ToList();
+            var teachersToRemove = course.Teachers.Where(t => !dto.TeacherIds.Contains(t.UserId)).ToList();
+            var teacherIdsToAdd = dto.TeacherIds.Except(currentTeacherIds).ToList();
+
+            foreach (var teacher in teachersToRemove)
+            {
+                course.Teachers.Remove(teacher);
+            }
+
+            foreach (var teacherId in teacherIdsToAdd)
+            {
+                course.Teachers.Add(new CourseTeacher
+                {
+                    UserId = teacherId,
+                    JoinedAt = DateTime.UtcNow
+                });
+            }
+
+            // Обновляем список студентов
+            var currentStudentIds = course.Students.Select(s => s.UserId).ToList();
+            var studentsToRemove = course.Students.Where(s => !dto.StudentIds.Contains(s.UserId)).ToList();
+            var studentIdsToAdd = dto.StudentIds.Except(currentStudentIds).ToList();
+
+            foreach (var student in studentsToRemove)
+            {
+                course.Students.Remove(student);
+            }
+
+            foreach (var studentId in studentIdsToAdd)
+            {
+                course.Students.Add(new CourseStudent
+                {
+                    UserId = studentId,
+                    EnrolledAt = DateTime.UtcNow
+                });
+            }
 
             await _context.SaveChangesAsync();
-            return Ok();
+
+            // Возвращаем обновленную информацию о курсе
+            var updatedCourse = new
+            {
+                course.Id,
+                course.Name,
+                course.Description,
+                course.IsActive,
+                Subject = new
+                {
+                    course.Subject.Id,
+                    course.Subject.Name,
+                    course.Subject.Code
+                },
+                Teachers = course.Teachers.Select(t => new
+                {
+                    UserId = t.UserId,
+                    FullName = t.User.FullName,
+                    Email = t.User.Email,
+                    t.JoinedAt
+                }),
+                Students = course.Students.Select(s => new
+                {
+                    UserId = s.UserId,
+                    FullName = s.User.FullName,
+                    Email = s.User.Email,
+                    s.EnrolledAt
+                }),
+                StudentsCount = course.Students.Count,
+                TeachersCount = course.Teachers.Count,
+                Changes = new
+                {
+                    TeachersAdded = teacherIdsToAdd.Count,
+                    TeachersRemoved = teachersToRemove.Count,
+                    StudentsAdded = studentIdsToAdd.Count,
+                    StudentsRemoved = studentsToRemove.Count
+                }
+            };
+
+            return Ok(updatedCourse);
         }
 
         [HttpPost("{courseId}/teachers/{teacherId}")]

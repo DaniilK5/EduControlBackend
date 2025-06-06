@@ -312,5 +312,126 @@ namespace EduControlBackend.Controllers
 
             return Ok(result);
         }
+
+        [HttpGet("my")]
+        public async Task<IActionResult> GetMyGroupChats()
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            var chats = await _context.GroupChats
+                .Include(c => c.Members)
+                    .ThenInclude(m => m.User)
+                .Where(c => c.Members.Any(m => m.UserId == currentUserId))
+                .Select(c => new
+                {
+                    c.Id,
+                    c.Name,
+                    c.CreatedAt,
+                    MembersCount = c.Members.Count,
+                    IsAdmin = c.Members.Any(m => m.UserId == currentUserId && m.IsAdmin),
+                    LastMessage = c.Messages
+                        .Where(m => !m.IsDeleted)
+                        .OrderByDescending(m => m.Timestamp)
+                        .Select(m => new
+                        {
+                            m.Id,
+                            m.Content,
+                            m.Timestamp,
+                            Sender = new
+                            {
+                                m.Sender.Id,
+                                m.Sender.FullName
+                            },
+                            HasAttachment = m.AttachmentPath != null,
+                            m.AttachmentName
+                        })
+                        .FirstOrDefault(),
+                    Members = c.Members
+                        .Take(3) // ѕолучаем только первых трех участников дл€ превью
+                        .Select(m => new
+                        {
+                            m.User.Id,
+                            m.User.FullName,
+                            m.IsAdmin
+                        })
+                        .ToList(),
+                    UnreadCount = c.Messages.Count(m => 
+                        !m.IsDeleted && 
+                        m.Timestamp > c.Members
+                            .First(member => member.UserId == currentUserId)
+                            .JoinedAt
+                    )
+                })
+                .OrderByDescending(c => c.LastMessage.Timestamp)
+                .ToListAsync();
+
+            return Ok(new
+            {
+                TotalCount = chats.Count,
+                Chats = chats
+            });
+        }
+
+        [HttpGet("{chatId}")]
+        public async Task<IActionResult> GetGroupChat(int chatId)
+        {
+            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            var chat = await _context.GroupChats
+                .Include(c => c.Members)
+                    .ThenInclude(m => m.User)
+                .FirstOrDefaultAsync(c => c.Id == chatId);
+
+            if (chat == null)
+                return NotFound("„ат не найден");
+
+            // ѕровер€ем, €вл€етс€ ли пользователь участником чата
+            var currentMember = chat.Members.FirstOrDefault(m => m.UserId == currentUserId);
+            if (currentMember == null)
+                return Forbid("¬ы не €вл€етесь участником этого чата");
+
+            var result = new
+            {
+                chat.Id,
+                chat.Name,
+                chat.CreatedAt,
+                CurrentUserInfo = new
+                {
+                    IsAdmin = currentMember.IsAdmin,
+                    JoinedAt = currentMember.JoinedAt
+                },
+                Members = chat.Members.Select(m => new
+                {
+                    UserId = m.UserId,
+                    m.User.FullName,
+                    m.User.Email,
+                    m.IsAdmin,
+                    m.JoinedAt
+                }).OrderByDescending(m => m.IsAdmin)
+                  .ThenBy(m => m.FullName)
+                  .ToList(),
+                Statistics = new
+                {
+                    TotalMembers = chat.Members.Count,
+                    AdminsCount = chat.Members.Count(m => m.IsAdmin),
+                    TotalMessages = _context.Messages.Count(m => m.GroupChatId == chatId && !m.IsDeleted),
+                    TotalAttachments = _context.Messages.Count(m => 
+                        m.GroupChatId == chatId && 
+                        !m.IsDeleted && 
+                        m.AttachmentPath != null),
+                    UnreadMessages = _context.Messages.Count(m => 
+                        m.GroupChatId == chatId &&
+                        !m.IsDeleted && 
+                        m.Timestamp > currentMember.JoinedAt &&
+                        m.SenderId != currentUserId),
+                    YourMessages = _context.Messages.Count(m => 
+                        m.GroupChatId == chatId && 
+                        !m.IsDeleted && 
+                        m.SenderId == currentUserId)
+                }
+            };
+
+            return Ok(result);
+        }
     }
 }
