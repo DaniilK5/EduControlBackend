@@ -28,6 +28,8 @@ namespace EduControlBackend
         public DbSet<StudentGroup> StudentGroups { get; set; }
         public DbSet<GradeImage> GradeImages { get; set; }
         public DbSet<Absence> Absences { get; set; }
+
+
         public DbSet<CourseStudent> CourseStudents { get; set; }
         public DbSet<CourseTeacher> CourseTeachers { get; set; }
 
@@ -74,6 +76,9 @@ namespace EduControlBackend
                 .HasOne(ct => ct.User)
                 .WithMany()
                 .HasForeignKey(ct => ct.UserId);
+
+            modelBuilder.Entity<CourseTeacher>()
+                .ToTable("CourseTeacher"); // Явно указываем имя таблицы
 
             // Конфигурация для CourseStudent
             modelBuilder.Entity<CourseStudent>()

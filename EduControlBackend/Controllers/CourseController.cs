@@ -55,13 +55,13 @@ namespace EduControlBackend.Controllers
                 Description = dto.Description,
                 SubjectId = dto.SubjectId, // Добавляем связь с предметом
                 CreatedAt = DateTime.UtcNow,
-                Teachers = teachers.Select(t => new CourseTeacher 
-                { 
+                Teachers = teachers.Select(t => new CourseTeacher
+                {
                     UserId = t.Id,
                     JoinedAt = DateTime.UtcNow
                 }).ToList(),
-                Students = students.Select(s => new CourseStudent 
-                { 
+                Students = students.Select(s => new CourseStudent
+                {
                     UserId = s.Id,
                     EnrolledAt = DateTime.UtcNow
                 }).ToList()
@@ -369,6 +369,99 @@ namespace EduControlBackend.Controllers
                 return BadRequest("Нельзя удалить последнего преподавателя из курса");
 
             course.Teachers.Remove(teacher);
+            await _context.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        // Получение списка студентов курса
+        [HttpGet("{courseId}/students")]
+        [Authorize(Policy = UserRole.Policies.ViewCourses)]
+        public async Task<IActionResult> GetCourseStudents(int courseId)
+        {
+            var course = await _context.Courses
+                .Include(c => c.Students)
+                    .ThenInclude(s => s.User)
+                .FirstOrDefaultAsync(c => c.Id == courseId);
+
+            if (course == null)
+                return NotFound("Курс не найден");
+
+            var students = course.Students
+                .Select(s => new
+                {
+                    UserId = s.UserId,
+                    s.User.FullName,
+                    s.User.Email,
+                    s.User.StudentId,
+                    Group = s.User.Group != null ? new { s.User.Group.Id, s.User.Group.Name } : null,
+                    s.EnrolledAt
+                })
+                .OrderBy(s => s.FullName)
+                .ToList();
+
+            return Ok(students);
+        }
+
+        // Добавление студента в курс
+        [HttpPost("{courseId}/students/{studentId}")]
+        [Authorize(Policy = UserRole.Policies.ManageCourses)]
+        public async Task<IActionResult> AddStudent(int courseId, int studentId)
+        {
+            var course = await _context.Courses
+                .Include(c => c.Students)
+                .FirstOrDefaultAsync(c => c.Id == courseId);
+
+            if (course == null)
+                return NotFound("Курс не найден");
+
+            var student = await _context.Users
+                .FirstOrDefaultAsync(u => u.Id == studentId && u.Role == UserRole.Student);
+
+            if (student == null)
+                return BadRequest("Пользователь не найден или не является студентом");
+
+            if (course.Students.Any(s => s.UserId == studentId))
+                return BadRequest("Студент уже добавлен в курс");
+
+            var courseStudent = new CourseStudent
+            {
+                CourseId = courseId,
+                UserId = studentId,
+                EnrolledAt = DateTime.UtcNow
+            };
+
+            course.Students.Add(courseStudent);
+            await _context.SaveChangesAsync();
+
+            // Возвращаем информацию о добавленном студенте
+            return Ok(new
+            {
+                UserId = student.Id,
+                student.FullName,
+                student.Email,
+                student.StudentId,
+                Group = student.Group != null ? new { student.Group.Id, student.Group.Name } : null,
+                EnrolledAt = courseStudent.EnrolledAt
+            });
+        }
+        // Удаление студента из курса
+        [HttpDelete("{courseId}/students/{studentId}")]
+        [Authorize(Policy = UserRole.Policies.ManageCourses)]
+        public async Task<IActionResult> RemoveStudent(int courseId, int studentId)
+        {
+            var course = await _context.Courses
+                .Include(c => c.Students)
+                .FirstOrDefaultAsync(c => c.Id == courseId);
+
+            if (course == null)
+                return NotFound("Курс не найден");
+
+            var student = course.Students.FirstOrDefault(s => s.UserId == studentId);
+            if (student == null)
+                return NotFound("Студент не найден в курсе");
+
+            course.Students.Remove(student);
             await _context.SaveChangesAsync();
 
             return Ok();

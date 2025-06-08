@@ -21,6 +21,244 @@ namespace EduControl.Controllers
             _context = context;
         }
 
+        // Получение оценок текущего студента
+        [HttpGet("me/grades")]
+        [Authorize(Roles = UserRole.Student)]
+        public async Task<IActionResult> GetMyGrades(
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] int? subjectId = null)
+        {
+            var studentId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+            // Формируем базовый запрос
+            var gradesQuery = _context.Grades
+                .Include(g => g.Assignment)
+                    .ThenInclude(a => a.Course)
+                        .ThenInclude(c => c.Subject)
+                .Include(g => g.Instructor)
+                .Where(g => g.StudentId == studentId);
+
+            // Применяем фильтры
+            if (startDate.HasValue)
+                gradesQuery = gradesQuery.Where(g => g.GradedAt >= startDate.Value);
+            if (endDate.HasValue)
+                gradesQuery = gradesQuery.Where(g => g.GradedAt <= endDate.Value);
+            if (subjectId.HasValue)
+                gradesQuery = gradesQuery.Where(g => g.Assignment.Course.SubjectId == subjectId);
+
+            // Получаем оценки
+            var grades = await gradesQuery
+                .OrderByDescending(g => g.GradedAt)
+                .Select(g => new
+                {
+                    g.Id,
+                    g.Value,
+                    g.GradedAt,
+                    g.Comment,
+                    Assignment = new
+                    {
+                        g.Assignment.Id,
+                        g.Assignment.Title,
+                        Course = new
+                        {
+                            g.Assignment.Course.Id,
+                            g.Assignment.Course.Name,
+                            Subject = new
+                            {
+                                g.Assignment.Course.Subject.Id,
+                                g.Assignment.Course.Subject.Name,
+                                g.Assignment.Course.Subject.Code
+                            }
+                        }
+                    },
+                    Instructor = new
+                    {
+                        g.Instructor.Id,
+                        g.Instructor.FullName
+                    }
+                })
+                .ToListAsync();
+
+            // Группируем по предметам для статистики
+            var subjectsPerformance = grades
+                .GroupBy(g => g.Assignment.Course.Subject.Id)
+                .Select(g => new
+                {
+                    SubjectId = g.Key,
+                    SubjectName = g.First().Assignment.Course.Subject.Name,
+                    SubjectCode = g.First().Assignment.Course.Subject.Code,
+                    AverageGrade = Math.Round(g.Average(x => x.Value), 2),
+                    GradesCount = g.Count(),
+                    MinGrade = g.Min(x => x.Value),
+                    MaxGrade = g.Max(x => x.Value),
+                    LatestGrades = g.OrderByDescending(x => x.GradedAt).Take(5)
+                })
+                .OrderByDescending(x => x.AverageGrade)
+                .ToList();
+
+            return Ok(new
+            {
+                TotalGrades = grades.Count,
+                AverageGrade = grades.Any() ? Math.Round(grades.Average(g => g.Value), 2) : 0,
+                GradeDistribution = new
+                {
+                    Excellent = grades.Count(g => g.Value >= 90),
+                    Good = grades.Count(g => g.Value >= 75 && g.Value < 90),
+                    Satisfactory = grades.Count(g => g.Value >= 60 && g.Value < 75),
+                    Poor = grades.Count(g => g.Value < 60)
+                },
+                SubjectsPerformance = subjectsPerformance,
+                Period = new
+                {
+                    StartDate = startDate?.ToString("yyyy-MM-dd"),
+                    EndDate = endDate?.ToString("yyyy-MM-dd"),
+                    FirstGradeDate = grades.Any() ? grades.Min(g => g.GradedAt).ToString("yyyy-MM-dd") : null,
+                    LastGradeDate = grades.Any() ? grades.Max(g => g.GradedAt).ToString("yyyy-MM-dd") : null
+                },
+                Grades = grades
+            });
+        }
+        // Получение списка преподавателей с возможностью фильтрации по занятости
+        [HttpGet("teachers")]
+        [Authorize(Policy = UserRole.Policies.ManageCourses)]
+        public async Task<IActionResult> GetTeachers([FromQuery] bool onlyAvailable = false)
+        {
+            var query = _context.Users
+                .Include(u => u.CuratedGroups)
+                .Where(u => u.Role == UserRole.Teacher ||
+                            (u.Role == UserRole.Administrator &&
+                             _context.CourseTeachers.Any(ct => ct.UserId == u.Id)));
+
+            if (onlyAvailable)
+            {
+                // Исключаем преподавателей, которые уже являются кураторами групп
+                query = query.Where(u => !u.CuratedGroups.Any());
+            }
+
+            var teachers = await query
+                .Select(t => new
+                {
+                    t.Id,
+                    t.FullName,
+                    t.Email,
+                    t.PhoneNumber,
+                    IsCurator = t.CuratedGroups.Any(),
+                    CuratedGroups = t.CuratedGroups.Select(g => new
+                    {
+                        g.Id,
+                        g.Name
+                    }).ToList(),
+                    TeachingCourses = _context.CourseTeachers
+                        .Where(ct => ct.UserId == t.Id)
+                        .Select(ct => new
+                        {
+                            ct.Course.Id,
+                            ct.Course.Name,
+                            SubjectName = ct.Course.Subject.Name
+                        }).ToList()
+                })
+                .OrderBy(t => t.FullName)
+                .ToListAsync();
+
+            return Ok(teachers);
+        }
+
+        [HttpGet("students")]
+        [Authorize(Policy = UserRole.Policies.ManageStudents)]
+        public async Task<IActionResult> GetStudents(
+            [FromQuery] bool withoutGroup = false,
+            [FromQuery] int? groupId = null,
+            [FromQuery] string? searchTerm = null)
+        {
+            // Базовый запрос студентов
+            var query = _context.Users
+                .Include(u => u.Group)
+                    .ThenInclude(g => g.Curator)
+                .Where(u => u.Role == UserRole.Student);
+
+            // Фильтр по группе
+            if (withoutGroup)
+            {
+                query = query.Where(u => u.StudentGroupId == null);
+            }
+            else if (groupId.HasValue)
+            {
+                query = query.Where(u => u.StudentGroupId == groupId);
+            }
+
+            // Поиск по имени или студенческому билету
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                var term = searchTerm.ToLower();
+                query = query.Where(u =>
+                    u.FullName.ToLower().Contains(term) ||
+                    (u.StudentId != null && u.StudentId.ToLower().Contains(term)));
+            }
+
+            // Получаем данные
+            var students = await query
+                .Select(s => new
+                {
+                    s.Id,
+                    s.FullName,
+                    s.Email,
+                    s.StudentId,
+                    s.PhoneNumber,
+                    s.SocialStatus,
+                    GroupInfo = s.Group != null ? new
+                    {
+                        s.Group.Id,
+                        s.Group.Name,
+                        CuratorInfo = s.Group.Curator != null ? new
+                        {
+                            s.Group.Curator.Id,
+                            s.Group.Curator.FullName
+                        } : null
+                    } : null
+                })
+                .ToListAsync();
+
+            // Получаем информацию о курсах отдельным запросом
+            var studentIds = students.Select(s => s.Id).ToList();
+            var courseEnrollments = await _context.CourseStudents
+                .Where(cs => studentIds.Contains(cs.UserId))
+                .Select(cs => new
+                {
+                    cs.UserId,
+                    CourseInfo = new
+                    {
+                        cs.Course.Id,
+                        cs.Course.Name,
+                        SubjectName = cs.Course.Subject.Name
+                    }
+                })
+                .ToListAsync();
+
+            // Объединяем данные
+            var result = students.Select(s => new
+            {
+                s.Id,
+                s.FullName,
+                s.Email,
+                s.StudentId,
+                s.PhoneNumber,
+                s.SocialStatus,
+                Group = s.GroupInfo,
+                EnrolledCourses = courseEnrollments
+                    .Where(ce => ce.UserId == s.Id)
+                    .Select(ce => ce.CourseInfo)
+                    .ToList()
+            })
+            .OrderBy(s => s.Group?.Name ?? "") // Сортировка: сначала по имени группы
+            .ThenBy(s => s.FullName);          // затем по имени студента
+
+            return Ok(new
+            {
+                TotalCount = students.Count,
+                Students = result
+            });
+        }
         [HttpGet("me")]
         public async Task<ActionResult<UserProfileDto>> GetMyProfile()
         {

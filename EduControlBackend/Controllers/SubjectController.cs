@@ -94,18 +94,12 @@ namespace EduControlBackend.Controllers
             var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
             var userRole = User.FindFirstValue(ClaimTypes.Role);
 
-            var subject = await _context.Subjects
-                .Include(s => s.Courses)
-                    .ThenInclude(c => c.Teachers)
-                        .ThenInclude(t => t.User)
-                .FirstOrDefaultAsync(s => s.Id == subjectId);
+            var query = _context.Courses
+                .Include(c => c.Teachers)
+                    .ThenInclude(t => t.User)
+                .Where(c => c.SubjectId == subjectId && c.IsActive);
 
-            if (subject == null)
-                return NotFound("Предмет не найден");
-
-            var query = subject.Courses.AsQueryable();
-
-            // Фильтруем курсы в зависимости от роли
+            // Фильтруем курсы в зависимости от роли на уровне базы данных
             if (userRole == UserRole.Teacher)
             {
                 query = query.Where(c => c.Teachers.Any(t => t.UserId == currentUserId));
@@ -115,8 +109,13 @@ namespace EduControlBackend.Controllers
                 query = query.Where(c => c.Students.Any(s => s.UserId == currentUserId));
             }
 
-            var courses = query
-                .Where(c => c.IsActive)
+            var subject = await _context.Subjects
+                .FirstOrDefaultAsync(s => s.Id == subjectId);
+
+            if (subject == null)
+                return NotFound("Предмет не найден");
+
+            var courses = await query
                 .Select(c => new
                 {
                     c.Id,
@@ -129,11 +128,16 @@ namespace EduControlBackend.Controllers
                         t.User.FullName,
                         t.User.Email
                     }),
-                    StudentsCount = c.Students.Count
+                    StudentsCount = c.Students.Count()
                 })
-                .ToList();
+                .ToListAsync();
 
-            return Ok(new { subject.Name, subject.Code, Courses = courses });
+            return Ok(new 
+            { 
+                subject.Name, 
+                subject.Code, 
+                Courses = courses 
+            });
         }
 
         [HttpGet("student/{studentId}")]

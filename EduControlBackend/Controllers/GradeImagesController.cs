@@ -88,14 +88,12 @@ namespace EduControlBackend.Controllers
 
         // Получение списка изображений
         [HttpGet]
+        [AllowAnonymous] // Делаем доступным для всех
         public async Task<IActionResult> GetImages(
             [FromQuery] ImageType? type = null,
             [FromQuery] int? subjectId = null,
             [FromQuery] int? groupId = null)
         {
-            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
-            var userRole = User.FindFirstValue(ClaimTypes.Role);
-
             var query = _context.GradeImages
                 .Include(g => g.Subject)
                 .Include(g => g.StudentGroup)
@@ -114,31 +112,6 @@ namespace EduControlBackend.Controllers
             if (groupId.HasValue)
                 query = query.Where(g => g.StudentGroupId == groupId);
 
-            // Фильтрация по правам доступа
-            if (userRole == UserRole.Student)
-            {
-                var studentGroupId = await _context.Users
-                    .Where(u => u.Id == currentUserId)
-                    .Select(u => u.StudentGroupId)
-                    .FirstOrDefaultAsync();
-
-                query = query.Where(g => g.StudentGroupId == studentGroupId);
-            }
-            else if (userRole == UserRole.Parent)
-            {
-                // Здесь нужно добавить логику для родителей, когда будет реализована связь родитель-студент
-                return BadRequest("Функционал для родителей в разработке");
-            }
-            else if (userRole == UserRole.Teacher)
-            {
-                var curatedGroupIds = await _context.StudentGroups
-                    .Where(g => g.CuratorId == currentUserId)
-                    .Select(g => g.Id)
-                    .ToListAsync();
-
-                query = query.Where(g => curatedGroupIds.Contains(g.StudentGroupId ?? 0));
-            }
-
             var images = await query
                 .OrderByDescending(g => g.UploadedAt)
                 .Select(g => new
@@ -154,47 +127,29 @@ namespace EduControlBackend.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(images);
+            return Ok(new
+            {
+                TotalCount = images.Count,
+                FilterInfo = new
+                {
+                    Type = type,
+                    SubjectId = subjectId,
+                    GroupId = groupId
+                },
+                Images = images
+            });
         }
 
         // Скачивание изображения
         [HttpGet("{id}/download")]
+        [AllowAnonymous] // Делаем доступным для всех
         public async Task<IActionResult> DownloadImage(int id)
         {
-            var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
-            var userRole = User.FindFirstValue(ClaimTypes.Role);
-
             var image = await _context.GradeImages
-                .Include(g => g.StudentGroup)
                 .FirstOrDefaultAsync(g => g.Id == id);
 
             if (image == null)
                 return NotFound("Изображение не найдено");
-
-            // Проверка прав доступа
-            if (userRole == UserRole.Student)
-            {
-                var studentGroupId = await _context.Users
-                    .Where(u => u.Id == currentUserId)
-                    .Select(u => u.StudentGroupId)
-                    .FirstOrDefaultAsync();
-
-                if (image.StudentGroupId != studentGroupId)
-                    return Forbid();
-            }
-            else if (userRole == UserRole.Parent)
-            {
-                // Логика для родителей
-                return BadRequest("Функционал для родителей в разработке");
-            }
-            else if (userRole == UserRole.Teacher && image.UploaderId != currentUserId)
-            {
-                var isCurator = await _context.StudentGroups
-                    .AnyAsync(g => g.Id == image.StudentGroupId && g.CuratorId == currentUserId);
-
-                if (!isCurator)
-                    return Forbid();
-            }
 
             var fileStream = image.Type == ImageType.Grades ? 
                 _fileService.GetGradeImageStream(image.FilePath) : 
@@ -203,7 +158,15 @@ namespace EduControlBackend.Controllers
             if (fileStream == null)
                 return NotFound("Файл не найден");
 
-            return File(fileStream, "application/octet-stream", image.FileName);
+            // Определяем MIME-тип на основе расширения файла
+            var mimeType = image.FileType.ToLowerInvariant() switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                _ => "application/octet-stream"
+            };
+
+            return File(fileStream, mimeType, image.FileName);
         }
 
         // Удаление изображения

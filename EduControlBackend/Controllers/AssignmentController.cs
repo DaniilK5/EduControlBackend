@@ -179,8 +179,16 @@ namespace EduControlBackend.Controllers
             try
             {
                 var fileBytes = await _fileService.GetFileAsync(submission.AttachmentPath);
-                return File(fileBytes, submission.AttachmentType ?? "application/octet-stream", 
-                    submission.AttachmentName);
+                var contentType = !string.IsNullOrEmpty(submission.AttachmentType) ? 
+                    submission.AttachmentType : "application/octet-stream";
+                
+                // Проверяем корректность ContentType
+                if (!IsValidContentType(contentType))
+                {
+                    contentType = "application/octet-stream";
+                }
+
+                return File(fileBytes, contentType, submission.AttachmentName);
             }
             catch (FileNotFoundException)
             {
@@ -391,12 +399,35 @@ namespace EduControlBackend.Controllers
             try
             {
                 var fileBytes = await _fileService.GetFileAsync(assignment.AttachmentPath);
-                return File(fileBytes, assignment.AttachmentType ?? "application/octet-stream",
-                    assignment.AttachmentName);
+                var contentType = !string.IsNullOrEmpty(assignment.AttachmentType) ? 
+                    assignment.AttachmentType : "application/octet-stream";
+                
+                // Проверяем корректность ContentType
+                if (!IsValidContentType(contentType))
+                {
+                    contentType = "application/octet-stream";
+                }
+
+                return File(fileBytes, contentType, assignment.AttachmentName);
             }
             catch (FileNotFoundException)
             {
                 return NotFound();
+            }
+        }
+
+        // Вспомогательный метод для проверки корректности ContentType
+        private bool IsValidContentType(string contentType)
+        {
+            try
+            {
+                // Пытаемся распарсить contentType
+                var mediaType = Microsoft.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
     }
