@@ -466,5 +466,47 @@ namespace EduControlBackend.Controllers
 
             return Ok();
         }
+
+        [HttpDelete("{id}")]
+        [Authorize(Policy = UserRole.Policies.ManageCourses)]
+        public async Task<IActionResult> DeleteCourse(int id)
+        {
+            var course = await _context.Courses
+                .Include(c => c.Teachers)
+                .Include(c => c.Students)
+                .Include(c => c.Assignments)
+                    .ThenInclude(a => a.Submissions)
+                .FirstOrDefaultAsync(c => c.Id == id);
+
+            if (course == null)
+                return NotFound("Курс не найден");
+
+            // Удаляем связанные записи
+            foreach (var assignment in course.Assignments.ToList())
+            {
+                foreach (var submission in assignment.Submissions.ToList())
+                {
+                    _context.AssignmentSubmissions.Remove(submission);
+                }
+                _context.Assignments.Remove(assignment);
+            }
+
+            // Удаляем связи с преподавателями и студентами
+            foreach (var teacher in course.Teachers.ToList())
+            {
+                _context.CourseTeachers.Remove(teacher);
+            }
+
+            foreach (var student in course.Students.ToList())
+            {
+                _context.CourseStudents.Remove(student);
+            }
+
+            // Удаляем сам курс
+            _context.Courses.Remove(course);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Курс успешно удален" });
+        }
     }
 }

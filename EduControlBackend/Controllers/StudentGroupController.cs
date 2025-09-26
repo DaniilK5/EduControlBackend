@@ -175,15 +175,14 @@ namespace EduControlBackend.Controllers
         }
         [HttpGet("{groupId}/statistics")]
         [Authorize(Policy = UserRole.Policies.ManageStudents)]
-        public async Task<IActionResult> GetGroupStatistics(int groupId,
-    [FromQuery] DateTime? startDate = null,
-    [FromQuery] DateTime? endDate = null)
+        public async Task<IActionResult> GetGroupStatistics(int groupId, [FromQuery] DateTime? startDate = null, [FromQuery] DateTime? endDate = null)
         {
             var curatorId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier));
             var userRole = User.FindFirstValue(ClaimTypes.Role);
 
             var group = await _context.StudentGroups
                 .Include(g => g.Students)
+                .Include(g => g.Curator)
                 .FirstOrDefaultAsync(g => g.Id == groupId);
 
             if (group == null)
@@ -194,27 +193,23 @@ namespace EduControlBackend.Controllers
 
             var studentIds = group.Students.Select(s => s.Id).ToList();
 
-            // Получаем статистику успеваемости
             var gradesQuery = _context.Grades
                 .Where(g => studentIds.Contains(g.StudentId));
-
-            // Получаем статистику пропусков
             var absencesQuery = _context.Absences
                 .Where(a => studentIds.Contains(a.StudentId));
 
-            // Применяем фильтры по датам
             if (startDate.HasValue)
             {
                 gradesQuery = gradesQuery.Where(g => g.GradedAt >= startDate.Value);
                 absencesQuery = absencesQuery.Where(a => a.Date >= startDate.Value);
             }
+
             if (endDate.HasValue)
             {
                 gradesQuery = gradesQuery.Where(g => g.GradedAt <= endDate.Value);
                 absencesQuery = absencesQuery.Where(a => a.Date <= endDate.Value);
             }
 
-            // Собираем статистику по каждому студенту
             var studentsStats = await _context.Users
                 .Where(u => studentIds.Contains(u.Id))
                 .Select(s => new
@@ -252,16 +247,20 @@ namespace EduControlBackend.Controllers
                     {
                         AverageGrade = gradesQuery
                             .Where(g => g.StudentId == s.Id)
-                            .Average(g => (double?)g.Value) ?? 0,
+                            .Select(g => (double?)g.Value)
+                            .DefaultIfEmpty()
+                            .Average() ?? 0,
                         SubjectsPerformance = gradesQuery
                             .Where(g => g.StudentId == s.Id)
                             .GroupBy(g => g.Assignment.Course.Subject.Name)
                             .Select(g => new
                             {
                                 Subject = g.Key,
-                                AverageGrade = g.Average(x => x.Value),
+                                AverageGrade = g.Any() ? g.Average(x => x.Value) : 0,
                                 GradesCount = g.Count(),
-                                LatestGrade = g.OrderByDescending(x => x.GradedAt).FirstOrDefault().Value
+                                LatestGrade = g.OrderByDescending(x => x.GradedAt)
+                                               .Select(x => (double?)x.Value)
+                                               .FirstOrDefault() ?? 0
                             })
                             .ToList()
                     },
@@ -269,37 +268,46 @@ namespace EduControlBackend.Controllers
                     {
                         TotalAbsences = absencesQuery
                             .Where(a => a.StudentId == s.Id)
-                            .Sum(a => a.Hours),
+                            .Select(a => (int?)a.Hours)
+                            .DefaultIfEmpty()
+                            .Sum() ?? 0,
                         ExcusedAbsences = absencesQuery
                             .Where(a => a.StudentId == s.Id && a.IsExcused)
-                            .Sum(a => a.Hours),
+                            .Select(a => (int?)a.Hours)
+                            .DefaultIfEmpty()
+                            .Sum() ?? 0,
                         UnexcusedAbsences = absencesQuery
                             .Where(a => a.StudentId == s.Id && !a.IsExcused)
-                            .Sum(a => a.Hours)
+                            .Select(a => (int?)a.Hours)
+                            .DefaultIfEmpty()
+                            .Sum() ?? 0
                     }
                 })
                 .ToListAsync();
 
-            // Подсчитываем общую статистику по группе
+            var studentsWithGrades = studentsStats.Where(s => s.Grades.Any()).ToList();
+
             var totalStats = new
             {
                 StudentsCount = studentsStats.Count,
-                AverageGroupGrade = studentsStats
-                    .Where(s => s.Grades.Any())
-                    .Average(s => s.Performance.AverageGrade),
+                AverageGroupGrade = studentsWithGrades.Any()
+                    ? studentsWithGrades.Average(s => s.Performance.AverageGrade)
+                    : 0,
                 GradeDistribution = new
                 {
-                    Excellent = studentsStats.Count(s => s.Performance.AverageGrade >= 90),
-                    Good = studentsStats.Count(s => s.Performance.AverageGrade >= 75 && s.Performance.AverageGrade < 90),
-                    Satisfactory = studentsStats.Count(s => s.Performance.AverageGrade >= 60 && s.Performance.AverageGrade < 75),
-                    Poor = studentsStats.Count(s => s.Performance.AverageGrade < 60)
+                    Excellent = studentsWithGrades.Count(s => s.Performance.AverageGrade >= 90),
+                    Good = studentsWithGrades.Count(s => s.Performance.AverageGrade >= 75 && s.Performance.AverageGrade < 90),
+                    Satisfactory = studentsWithGrades.Count(s => s.Performance.AverageGrade >= 60 && s.Performance.AverageGrade < 75),
+                    Poor = studentsWithGrades.Count(s => s.Performance.AverageGrade < 60)
                 },
                 Attendance = new
                 {
                     TotalAbsenceHours = studentsStats.Sum(s => s.Attendance.TotalAbsences),
                     ExcusedHours = studentsStats.Sum(s => s.Attendance.ExcusedAbsences),
                     UnexcusedHours = studentsStats.Sum(s => s.Attendance.UnexcusedAbsences),
-                    AverageAbsenceHoursPerStudent = studentsStats.Average(s => s.Attendance.TotalAbsences)
+                    AverageAbsenceHoursPerStudent = studentsStats.Any()
+                        ? studentsStats.Average(s => s.Attendance.TotalAbsences)
+                        : 0
                 },
                 Period = new
                 {
@@ -315,13 +323,14 @@ namespace EduControlBackend.Controllers
                     group.Id,
                     group.Name,
                     group.Description,
-                    Curator = group.Curator != null ? new { group.Curator.Id, group.Curator.FullName } : null
+                    Curator = group.Curator != null
+                        ? new { group.Curator.Id, group.Curator.FullName }
+                        : null
                 },
                 Statistics = totalStats,
                 Students = studentsStats.OrderByDescending(s => s.Performance.AverageGrade)
             });
         }
-
         [HttpPost("{groupId}/curator")]
         [Authorize(Policy = UserRole.Policies.ManageStudents)]
         public async Task<IActionResult> AssignCurator(int groupId, [FromBody] AssignCuratorDto dto)

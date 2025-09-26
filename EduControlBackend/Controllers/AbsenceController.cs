@@ -323,6 +323,7 @@ namespace EduControlBackend.Controllers
 
             var query = _context.Users
                 .Include(u => u.Group)
+                    .ThenInclude(g => g.Curator)
                 .Where(u => u.Role == UserRole.Student && u.StudentGroupId != null)
                 .AsQueryable();
 
@@ -345,7 +346,21 @@ namespace EduControlBackend.Controllers
                 // Объединяем результаты
                 query = curatedStudents.Union(taughtStudents);
             }
-            // Для администраторов оставляем полный список
+
+            var monthAgo = DateTime.UtcNow.AddMonths(-1);
+            
+            // Получаем все пропуски за последний месяц отдельным запросом
+            var recentAbsences = await _context.Absences
+                .Where(a => a.Date >= monthAgo)
+                .Select(a => new
+                {
+                    a.StudentId,
+                    a.Date,
+                    a.Hours,
+                    a.IsExcused,
+                    a.Reason
+                })
+                .ToListAsync();
 
             var students = await query
                 .OrderBy(s => s.Group.Name)
@@ -354,7 +369,7 @@ namespace EduControlBackend.Controllers
                 {
                     s.Id,
                     s.FullName,
-                    s.StudentId, // Номер студенческого билета
+                    s.StudentId,
                     Group = new
                     {
                         s.Group.Id,
@@ -364,24 +379,11 @@ namespace EduControlBackend.Controllers
                             s.Group.Curator.Id,
                             s.Group.Curator.FullName
                         } : null
-                    },
-                    // Добавляем информацию о пропусках за последний месяц
-                    RecentAbsences = _context.Absences
-                        .Where(a => a.StudentId == s.Id &&
-                                   a.Date >= DateTime.UtcNow.AddMonths(-1))
-                        .OrderByDescending(a => a.Date)
-                        .Select(a => new
-                        {
-                            a.Date,
-                            a.Hours,
-                            a.IsExcused,
-                            a.Reason
-                        })
-                        .ToList()
+                    }
                 })
                 .ToListAsync();
 
-            // Группируем студентов по группам для удобства
+            // Группируем студентов по группам и добавляем информацию о пропусках
             var groupedStudents = students
                 .GroupBy(s => s.Group.Name)
                 .Select(g => new
@@ -389,15 +391,23 @@ namespace EduControlBackend.Controllers
                     GroupName = g.Key,
                     GroupId = g.First().Group.Id,
                     Curator = g.First().Group.Curator,
-                    Students = g.Select(s => new
+                    Students = g.Select(s =>
                     {
-                        s.Id,
-                        s.FullName,
-                        s.StudentId,
-                        TotalAbsenceHours = s.RecentAbsences.Sum(a => a.Hours),
-                        ExcusedHours = s.RecentAbsences.Where(a => a.IsExcused).Sum(a => a.Hours),
-                        UnexcusedHours = s.RecentAbsences.Where(a => !a.IsExcused).Sum(a => a.Hours),
-                        RecentAbsences = s.RecentAbsences
+                        var studentAbsences = recentAbsences
+                            .Where(a => a.StudentId == s.Id)
+                            .OrderByDescending(a => a.Date)
+                            .ToList();
+
+                        return new
+                        {
+                            s.Id,
+                            s.FullName,
+                            s.StudentId,
+                            TotalAbsenceHours = studentAbsences.Sum(a => a.Hours),
+                            ExcusedHours = studentAbsences.Where(a => a.IsExcused).Sum(a => a.Hours),
+                            UnexcusedHours = studentAbsences.Where(a => !a.IsExcused).Sum(a => a.Hours),
+                            RecentAbsences = studentAbsences
+                        };
                     }).OrderBy(s => s.FullName)
                 })
                 .OrderBy(g => g.GroupName);

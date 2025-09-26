@@ -270,7 +270,7 @@ namespace EduControlBackend.Controllers
 
             _context.Subjects.Remove(subject);
             await _context.SaveChangesAsync();
-            return Ok();
+            return Ok(new { message = "Предмет успешно удален" });
         }
     }
 }

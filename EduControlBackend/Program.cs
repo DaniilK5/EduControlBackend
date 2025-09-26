@@ -10,6 +10,8 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseUrls("http://localhost:5105"); // Добавьте эту строку
+
 
 // Add services to the container.
 
