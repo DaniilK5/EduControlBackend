@@ -1,5 +1,4 @@
 ﻿using EduControlBackend.Models;
-using EduControlBackend.Models.LoginAndReg;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -26,24 +25,6 @@ namespace EduControlBackend.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
         {
-            // Проверяем валидность роли
-            if (!UserRole.AllRoles.Contains(registerDto.Role))
-            {
-                return BadRequest("Недопустимая роль");
-            }
-
-            // Проверяем, что группа указана только для студентов
-            if (registerDto.Role != UserRole.Student && !string.IsNullOrEmpty(registerDto.StudentGroup))
-            {
-                return BadRequest("Группа может быть указана только для студентов");
-            }
-
-            // Если это студент, проверяем наличие группы
-            if (registerDto.Role == UserRole.Student && string.IsNullOrEmpty(registerDto.StudentGroup))
-            {
-                return BadRequest("Для студента необходимо указать группу");
-            }
-
             var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == registerDto.Email);
             if (existingUser != null)
             {
@@ -55,22 +36,8 @@ namespace EduControlBackend.Controllers
                 FullName = registerDto.FullName,
                 Email = registerDto.Email,
                 Password = BCrypt.Net.BCrypt.HashPassword(registerDto.Password),
-                Role = registerDto.Role,
-                StudentGroup = registerDto.StudentGroup
+                Role = registerDto.Role
             };
-
-            // Для родителей проверяем и связываем детей
-            if (registerDto.Role == UserRole.Parent && registerDto.ChildrenIds != null)
-            {
-                var children = await _context.Users
-                    .Where(u => registerDto.ChildrenIds.Contains(u.Id) && u.Role == UserRole.Student)
-                    .ToListAsync();
-
-                if (children.Count != registerDto.ChildrenIds.Count)
-                    return BadRequest("Некоторые указанные студенты не найдены");
-
-                user.Children = children;
-            }
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
@@ -96,10 +63,9 @@ namespace EduControlBackend.Controllers
         {
             var claims = new[]
             {
-                new Claim(ClaimTypes.Name, user.Email),
-                new Claim(ClaimTypes.Role, user.Role),
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())
-            };
+        new Claim(ClaimTypes.Name, user.Email),
+        new Claim(ClaimTypes.Role, user.Role)
+    };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:SecretKey"]));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
